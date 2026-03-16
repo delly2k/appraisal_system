@@ -7,7 +7,7 @@ export default async function OperationalPlanLayout({
   children: React.ReactNode;
 }) {
   const user = await getCurrentUser();
-  const isHrAdmin = user?.roles?.some((r) => r === "hr" || r === "admin" || r === "super_admin") ?? false;
+  const isHrAdmin = user?.roles?.some((r) => ["hr", "admin", "super_admin"].includes(r as string)) ?? false;
   if (!user || !isHrAdmin) {
     redirect("/admin");
   }

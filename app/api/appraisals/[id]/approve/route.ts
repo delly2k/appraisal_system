@@ -32,7 +32,7 @@ export async function POST(
     const role = body?.role as string | undefined;
     const comment = body?.comment as string | undefined;
 
-    if (!isApprovalRole(role)) {
+    if (role == null || !isApprovalRole(role)) {
       return NextResponse.json({ error: "role must be EMPLOYEE or MANAGER" }, { status: 400 });
     }
 

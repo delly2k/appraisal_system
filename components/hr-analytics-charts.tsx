@@ -67,7 +67,7 @@ export function HRAnalyticsCharts({
                     border: "1px solid hsl(var(--border))",
                     borderRadius: "8px",
                   }}
-                  formatter={(value: number) => [value, "Count"]}
+                  formatter={(value: number | undefined) => [value ?? 0, "Count"]}
                   labelFormatter={(label) => `Score band: ${label}`}
                 />
                 <Bar dataKey="count" name="Count" radius={[4, 4, 0, 0]}>
@@ -121,7 +121,7 @@ export function HRAnalyticsCharts({
                     border: "1px solid hsl(var(--border))",
                     borderRadius: "8px",
                   }}
-                  formatter={(value: number) => [value, "Avg score"]}
+                  formatter={(value: number | undefined) => [value ?? 0, "Avg score"]}
                   labelFormatter={(label) => label}
                 />
                 <Bar
@@ -173,7 +173,7 @@ export function HRAnalyticsCharts({
                     border: "1px solid hsl(var(--border))",
                     borderRadius: "8px",
                   }}
-                  formatter={(value: number) => [value, "Score"]}
+                  formatter={(value: number | undefined) => [value ?? 0, "Score"]}
                   labelFormatter={(_, payload) =>
                     payload?.[0]?.payload
                       ? `${(payload[0].payload as PerformerRow).employeeName} · ${(payload[0].payload as PerformerRow).divisionName ?? "—"}`
@@ -229,7 +229,7 @@ export function HRAnalyticsCharts({
                     border: "1px solid hsl(var(--border))",
                     borderRadius: "8px",
                   }}
-                  formatter={(value: number) => [value, "Score"]}
+                  formatter={(value: number | undefined) => [value ?? 0, "Score"]}
                   labelFormatter={(_, payload) =>
                     payload?.[0]?.payload
                       ? `${(payload[0].payload as PerformerRow).employeeName} · ${(payload[0].payload as PerformerRow).divisionName ?? "—"}`

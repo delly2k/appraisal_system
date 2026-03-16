@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Menu,
   Search,
-  QuestionCircle,
+  HelpCircle,
   Bell,
   Settings,
   ChevronDown,
@@ -94,7 +94,7 @@ export function PowerAppsShell({ children }: { children: React.ReactNode }) {
               className="flex h-9 w-9 items-center justify-center rounded text-[#605e5c] hover:bg-[#f3f2f1]"
               aria-label="Help"
             >
-              <QuestionCircle className="h-5 w-5" />
+              <HelpCircle className="h-5 w-5" />
             </button>
             <button
               type="button"

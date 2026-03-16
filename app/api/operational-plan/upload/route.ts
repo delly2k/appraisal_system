@@ -13,7 +13,7 @@ function getSupabaseAdmin() {
 async function requireHrAdmin() {
   const user = await getCurrentUser();
   if (!user?.roles?.length) return null;
-  const isHrAdmin = user.roles.some((r) => r === "hr" || r === "admin" || r === "super_admin");
+  const isHrAdmin = user.roles.some((r) => ["hr", "admin", "super_admin"].includes(r as string));
   return isHrAdmin ? user : null;
 }
 

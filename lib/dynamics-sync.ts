@@ -147,18 +147,16 @@ export async function fetchAllEmployeesFromDataverse(): Promise<DataverseEmploye
   const results: DataverseEmployeeRecord[] = [];
   let nextUrl: string | null = url;
 
+  type PagePayload = { value?: DataverseEmployeeRecord[]; "@odata.nextLink"?: string };
   while (nextUrl) {
-    const requestUrl = nextUrl.startsWith("http")
+    const requestUrl: string = nextUrl.startsWith("http")
       ? nextUrl
       : `${process.env.DYNAMICS_DATAVERSE_URL?.trim().replace(/\/$/, "")}/api/data/v9.2${nextUrl}`;
-    const { data } = await client.get<{
-      value?: DataverseEmployeeRecord[];
-      "@odata.nextLink"?: string;
-    }>(requestUrl);
-
-    const page = data.value ?? [];
+    const res = await client.get<PagePayload>(requestUrl);
+    const data = res.data as PagePayload | undefined;
+    const page = data?.value ?? [];
     results.push(...page);
-    nextUrl = data["@odata.nextLink"] ?? null;
+    nextUrl = data?.["@odata.nextLink"] ?? null;
   }
 
   return results;
@@ -232,17 +230,19 @@ export function mapToEmployeeRow(record: DataverseEmployeeRecord): EmployeeRow |
     ([record.firstname, record.lastname].filter(Boolean).join(" ").trim() || null);
   const isActive = record.isdisabled === true || record.isdisabled === 1 ? false : true;
 
+  const str = (v: string | number | boolean | null | undefined): string | null =>
+    v != null ? String(v) : null;
   return {
     employee_id: String(id),
     aad_object_id: record.azureactivedirectoryobjectid ?? null,
     email,
     full_name: fullName,
     job_title: record.title ?? null,
-    grade: record[FIELD_GRADE] ?? null,
-    division_id: record[FIELD_DIVISION_ID] ?? null,
-    division_name: record[FIELD_DIVISION_NAME] ?? null,
-    department_id: record[FIELD_DEPARTMENT_ID] ?? null,
-    department_name: record[FIELD_DEPARTMENT_NAME] ?? null,
+    grade: str(record[FIELD_GRADE] ?? null),
+    division_id: str(record[FIELD_DIVISION_ID] ?? null),
+    division_name: str(record[FIELD_DIVISION_NAME] ?? null),
+    department_id: str(record[FIELD_DEPARTMENT_ID] ?? null),
+    department_name: str(record[FIELD_DEPARTMENT_NAME] ?? null),
     employee_type: employeeType,
     is_active: isActive,
     last_synced_at: now,

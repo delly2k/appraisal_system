@@ -3,9 +3,17 @@
  * Disallows skipped or reverse transitions; only the next step is allowed.
  */
 
-import type { AppraisalStatus } from "@/types/appraisal";
+/** Phases used by this state machine (legacy workflow). */
+export type StateMachinePhase =
+  | "draft"
+  | "self_submitted"
+  | "manager_in_review"
+  | "manager_completed"
+  | "employee_acknowledged"
+  | "hr_in_review"
+  | "closed";
 
-const ORDER: AppraisalStatus[] = [
+const ORDER: StateMachinePhase[] = [
   "draft",
   "self_submitted",
   "manager_in_review",
@@ -15,12 +23,12 @@ const ORDER: AppraisalStatus[] = [
   "closed",
 ];
 
-const INDEX: Record<AppraisalStatus, number> = ORDER.reduce(
+const INDEX: Record<StateMachinePhase, number> = ORDER.reduce(
   (acc, s, i) => {
     acc[s] = i;
     return acc;
   },
-  {} as Record<AppraisalStatus, number>
+  {} as Record<StateMachinePhase, number>
 );
 
 /**
@@ -28,8 +36,8 @@ const INDEX: Record<AppraisalStatus, number> = ORDER.reduce(
  * No skipped steps, no reverse transitions.
  */
 export function canTransition(
-  current: AppraisalStatus,
-  next: AppraisalStatus
+  current: StateMachinePhase,
+  next: StateMachinePhase
 ): boolean {
   const i = INDEX[current];
   const j = INDEX[next];
@@ -40,8 +48,8 @@ export function canTransition(
 export class InvalidAppraisalTransitionError extends Error {
   readonly code = "INVALID_APPRAISAL_TRANSITION";
   constructor(
-    public readonly current: AppraisalStatus,
-    public readonly next: AppraisalStatus
+    public readonly current: StateMachinePhase,
+    public readonly next: StateMachinePhase
   ) {
     super(
       `Invalid appraisal status transition: ${current} → ${next}. Only the next step in the workflow is allowed.`
@@ -54,8 +62,8 @@ export class InvalidAppraisalTransitionError extends Error {
  * Throws InvalidAppraisalTransitionError if the transition from `current` to `next` is not allowed.
  */
 export function assertTransition(
-  current: AppraisalStatus,
-  next: AppraisalStatus
+  current: StateMachinePhase,
+  next: StateMachinePhase
 ): void {
   if (!canTransition(current, next)) {
     throw new InvalidAppraisalTransitionError(current, next);

@@ -121,7 +121,7 @@ export function HRTrendsCharts({
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
                     }}
-                    formatter={(value: number) => [value, "Avg score"]}
+                    formatter={(value: number | undefined) => [value ?? 0, "Avg score"]}
                     labelFormatter={(_, payload) =>
                       payload?.[0]?.payload?.cycleName ?? ""
                     }
@@ -247,7 +247,7 @@ export function HRTrendsCharts({
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
                     }}
-                    formatter={(value: number) => [value, "Count"]}
+                    formatter={(value: number | undefined) => [value ?? 0, "Count"]}
                   />
                   <Bar
                     dataKey="count"

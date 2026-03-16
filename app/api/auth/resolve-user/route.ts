@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { resolveUserFromDynamics } from "@/lib/dynamics-user-resolver";
 
 /**
@@ -10,15 +10,16 @@ import { resolveUserFromDynamics } from "@/lib/dynamics-user-resolver";
  */
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email && !session?.user?.id) {
+  const user = session?.user as { email?: string | null; name?: string | null; image?: string | null; id?: string } | null;
+  if (!user?.email && !user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const profile = await resolveUserFromDynamics({
-      email: session.user.email ?? undefined,
-      name: session.user.name ?? undefined,
-      id: (session.user as { id?: string })?.id ?? undefined,
+      email: user?.email ?? undefined,
+      name: user?.name ?? undefined,
+      id: user?.id ?? undefined,
     });
     if (!profile) {
       return NextResponse.json(

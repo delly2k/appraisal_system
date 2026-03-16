@@ -73,12 +73,13 @@ export async function getAllEmployees(): Promise<Xrm1Employee[]> {
   let nextUrl: string | null = `/${XRM_EMPLOYEES_ENTITY}?$select=${encodeURIComponent(SELECT_FIELDS)}&$top=5000`;
 
   while (nextUrl) {
-    const { data } = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
+    const res = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
       nextUrl.startsWith("http") ? nextUrl : nextUrl
     );
-    const page = data.value ?? [];
+    const data = res.data as { value?: Xrm1Employee[]; "@odata.nextLink"?: string } | undefined;
+    const page = data?.value ?? [];
     results.push(...page);
-    nextUrl = data["@odata.nextLink"] ?? null;
+    nextUrl = data?.["@odata.nextLink"] ?? null;
   }
 
   return results;
@@ -99,12 +100,13 @@ export async function getEligibleEmployeesForAppraisal(options?: {
     `/${XRM_EMPLOYEES_ENTITY}?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(SELECT_FIELDS)}&$top=5000`;
 
   while (nextUrl) {
-    const { data } = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
+    const res = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
       nextUrl.startsWith("http") ? nextUrl : nextUrl
     );
-    const page = data.value ?? [];
+    const data = res.data as { value?: Xrm1Employee[]; "@odata.nextLink"?: string } | undefined;
+    const page = data?.value ?? [];
     results.push(...page);
-    nextUrl = data["@odata.nextLink"] ?? null;
+    nextUrl = data?.["@odata.nextLink"] ?? null;
   }
 
   return results;
@@ -114,17 +116,19 @@ export async function getEligibleEmployeesForAppraisal(options?: {
 export async function getManager(employeeId: string): Promise<Xrm1Employee | null> {
   const client = await createDataverseApiClient();
   const filter = `xrm1_employeeid eq ${guidFilter(employeeId)}`;
-  const { data } = await client.get<{ value?: Xrm1Employee[] }>(
+  const res = await client.get<{ value?: Xrm1Employee[] }>(
     `/${XRM_EMPLOYEES_ENTITY}?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(SELECT_FIELDS)}&$top=1`
   );
-  const emp = data.value?.[0];
+  const data = res.data as { value?: Xrm1Employee[] } | undefined;
+  const emp = data?.value?.[0];
   if (!emp?._xrm1_manager_employee_id_value) return null;
   const managerId = emp._xrm1_manager_employee_id_value;
   const mFilter = `xrm1_employeeid eq ${guidFilter(managerId)}`;
-  const { data: mData } = await client.get<{ value?: Xrm1Employee[] }>(
+  const mRes = await client.get<{ value?: Xrm1Employee[] }>(
     `/${XRM_EMPLOYEES_ENTITY}?$filter=${encodeURIComponent(mFilter)}&$select=${encodeURIComponent(SELECT_FIELDS)}&$top=1`
   );
-  return mData.value?.[0] ?? null;
+  const mData = mRes.data as { value?: Xrm1Employee[] } | undefined;
+  return mData?.value?.[0] ?? null;
 }
 
 /** Get direct reports of an employee (employees who have this employee as manager). */
@@ -135,12 +139,13 @@ export async function getDirectReports(employeeId: string): Promise<Xrm1Employee
   let nextUrl: string | null = `/${XRM_EMPLOYEES_ENTITY}?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(SELECT_FIELDS)}&$top=5000`;
 
   while (nextUrl) {
-    const { data } = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
+    const res = await client.get<{ value?: Xrm1Employee[]; "@odata.nextLink"?: string }>(
       nextUrl.startsWith("http") ? nextUrl : nextUrl
     );
-    const page = data.value ?? [];
+    const data = res.data as { value?: Xrm1Employee[]; "@odata.nextLink"?: string } | undefined;
+    const page = data?.value ?? [];
     results.push(...page);
-    nextUrl = data["@odata.nextLink"] ?? null;
+    nextUrl = data?.["@odata.nextLink"] ?? null;
   }
 
   return results;
@@ -266,21 +271,23 @@ export async function getSameGradeEmployeesFromDynamics(grade: number | string):
   const results: PeerEligibleEmployee[] = [];
   let nextUrl: string | null = `/${XRM_EMPLOYEES_ENTITY}?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(PEER_SELECT)}&$top=5000`;
 
+  type PageRes = {
+    value?: {
+      _xrm1_employee_user_id_value?: string | null;
+      xrm1_fullname?: string | null;
+      xrm1_first_name?: string | null;
+      xrm1_last_name?: string | null;
+      emailaddress?: string | null;
+      xrm1_job_title?: string | null;
+      _xrm1_employee_department_id_value?: string | null;
+      "_xrm1_employee_department_id_value@OData.Community.Display.V1.FormattedValue"?: string | null;
+    }[];
+    "@odata.nextLink"?: string;
+  };
   while (nextUrl) {
-    const { data } = await client.get<{
-      value?: {
-        _xrm1_employee_user_id_value?: string | null;
-        xrm1_fullname?: string | null;
-        xrm1_first_name?: string | null;
-        xrm1_last_name?: string | null;
-        emailaddress?: string | null;
-        xrm1_job_title?: string | null;
-        _xrm1_employee_department_id_value?: string | null;
-        "_xrm1_employee_department_id_value@OData.Community.Display.V1.FormattedValue"?: string | null;
-      }[];
-      "@odata.nextLink"?: string;
-    }>(nextUrl);
-    const page = data.value ?? [];
+    const res = await client.get<PageRes>(nextUrl);
+    const data = res.data as PageRes | undefined;
+    const page = data?.value ?? [];
     for (const e of page) {
       const empId = e._xrm1_employee_user_id_value;
       if (!empId) continue;
@@ -295,7 +302,7 @@ export async function getSameGradeEmployeesFromDynamics(grade: number | string):
         department_name: (e as Record<string, unknown>)["_xrm1_employee_department_id_value@OData.Community.Display.V1.FormattedValue"] as string | undefined ?? null,
       });
     }
-    nextUrl = data["@odata.nextLink"] ?? null;
+    nextUrl = data?.["@odata.nextLink"] ?? null;
   }
   return results.sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""));
 }

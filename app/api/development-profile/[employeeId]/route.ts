@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 
 function getSupabase() {
@@ -10,7 +10,7 @@ function getSupabase() {
 }
 
 async function isManagerOf(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<any>,
   profileOwnerUserId: string,
   currentUserEmployeeId: string | null | undefined
 ): Promise<boolean> {
@@ -20,7 +20,7 @@ async function isManagerOf(
     .select("employee_id")
     .eq("id", profileOwnerUserId)
     .maybeSingle();
-  const reportEmployeeId = appUser?.employee_id ?? null;
+  const reportEmployeeId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
   if (!reportEmployeeId) return false;
   const { data: lines } = await supabase
     .from("reporting_lines")
@@ -59,7 +59,7 @@ export async function GET(
       .eq("id", employeeId)
       .maybeSingle();
 
-    const empId = appUser?.employee_id ?? null;
+    const empId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
     let cycles: { id: string; fiscal_year: string; status: string; updated_at: string }[] = [];
     let employee: { full_name: string; division: string } | null = null;
 

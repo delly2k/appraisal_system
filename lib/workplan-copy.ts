@@ -120,7 +120,7 @@ export async function copyPreviousWorkplan(
         createError?.message ?? "Failed to create target workplan"
       );
     }
-    targetWorkplan = { data: created, error: null };
+    targetWorkplan = { data: created, error: null, count: null, status: 201, statusText: "Created" };
   } else {
     await supabase
       .from("workplans")

@@ -8,7 +8,6 @@ import type { AppraisalStatus } from "@/types/appraisal";
 import { AppraisalTabs, AppraisalData } from "@/components/appraisal/AppraisalTabs";
 import { CompletionBarWrapperClient } from "@/components/appraisal/CompletionBarWrapperClient";
 
-type PageParams = { id: string } | Promise<{ id: string }>;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -80,7 +79,7 @@ async function getAppraisalDetail(
     cycleStartDate: cycleData?.start_date != null ? String(cycleData.start_date) : undefined,
     cycleEndDate: cycleData?.end_date != null ? String(cycleData.end_date) : undefined,
     review_type: appraisal.review_type ?? undefined,
-    cyclePhase: (cycleData?.phase as string | undefined) ?? undefined,
+    cyclePhase: cycleData?.phase != null ? String(cycleData.phase) : "",
     approvals,
     signoffs,
   };
@@ -151,9 +150,9 @@ const ArrowLeftIcon = () => (
 export default async function AppraisalDetailPage({
   params,
 }: {
-  params: PageParams;
+  params: Promise<{ id: string }>;
 }) {
-  const { id: appraisalId } = await Promise.resolve(params);
+  const { id: appraisalId } = await params;
   const [user, appraisal] = await Promise.all([
     getCurrentUser(),
     getAppraisalDetail(appraisalId),

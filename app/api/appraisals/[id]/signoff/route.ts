@@ -45,7 +45,7 @@ export async function POST(
     const stage = body?.stage as string | undefined;
     const comment = body?.comment as string | undefined;
 
-    if (!isSignoffRole(role) || !isSignoffStage(stage)) {
+    if (role == null || stage == null || !isSignoffRole(role) || !isSignoffStage(stage)) {
       return NextResponse.json(
         { error: "role must be EMPLOYEE|MANAGER|HOD|HR and stage must be PENDING_SIGNOFF|HOD_REVIEW|HR_REVIEW" },
         { status: 400 }

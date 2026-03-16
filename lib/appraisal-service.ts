@@ -9,8 +9,7 @@ import {
   generateAppraisalsForCycle,
   type GenerateResult,
 } from "@/lib/appraisal-generator";
-import type { AppraisalStatus } from "@/types/appraisal";
-import type { DashboardEmployeePayload } from "@/types/appraisal";
+import type { AppraisalStatus, DashboardEmployeePayload } from "@/types/appraisal";
 
 function getSupabaseAdmin(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -196,7 +195,7 @@ export async function getDashboardDataForEmployee(
     }
   }
 
-  const checkins = {
+  const checkins: DashboardEmployeePayload["checkins"] = {
     Q1: (quarterlyByQuarter.get(1) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
     Q2: (quarterlyByQuarter.get(2) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
     Q3: (quarterlyByQuarter.get(3) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",

@@ -1416,7 +1416,7 @@ export function WorkplanSection({
                                   <span className="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-violet-600 bg-violet-50/80 flex-shrink-0">MGR</span>
                                   <MgrActualInput
                                     item={row}
-                                    value={mgrValue}
+                                    value={mgrValue ?? null}
                                     onChange={(v) => updateRow(row.id, type === "DATE" ? "mgr_completion_date" : "mgr_actual_raw", v)}
                                     isChanged={mgrChanged}
                                     isConfirmed={mgrConfirmed}

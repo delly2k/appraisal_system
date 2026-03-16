@@ -152,11 +152,11 @@ function PersonCard({
         >
           {isLoadingIndirect ? (
             <p className="text-[12px] text-text-muted py-2">Loading…</p>
-          ) : indirectReports === null || indirectReports.length === 0 ? (
+          ) : indirectReports == null || indirectReports.length === 0 ? (
             <p className="text-[12px] text-text-muted py-2">No direct reports.</p>
           ) : (
             <ul className="space-y-1.5">
-              {indirectReports.map((sub, subIdx) => {
+              {(indirectReports ?? []).map((sub, subIdx) => {
                 const subVariant = getAvatarVariant(subIdx);
                 const subInitials = getInitials(sub.full_name || "??");
                 return (

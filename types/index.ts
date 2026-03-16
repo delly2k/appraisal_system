@@ -2,7 +2,7 @@
  * Shared types for the Employee Performance Appraisal Portal.
  */
 
-export type UserRole = "employee" | "manager" | "hr" | "admin" | "gm" | "individual";
+export type UserRole = "employee" | "manager" | "hr" | "admin" | "gm" | "individual" | "super_admin";
 
 export interface AppraisalCycle {
   id: string;

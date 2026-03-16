@@ -92,6 +92,21 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "development:view_own",
     "development:edit",
   ],
+  super_admin: [
+    "dashboard:view",
+    "appraisals:view_own",
+    "appraisals:submit",
+    "workplans:view_own",
+    "workplans:manage",
+    "development:view_own",
+    "development:edit",
+    "team_reviews:view",
+    "team_reviews:approve",
+    "admin:view",
+    "admin:manage_users",
+    "admin:manage_cycles",
+    "admin:reports",
+  ],
 };
 
 /**

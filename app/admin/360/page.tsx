@@ -772,12 +772,12 @@ export default function Admin360Page() {
                   key={c.id}
                   className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden mb-4"
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleCycleExpand(c.id)}
-                    className="w-full flex items-center justify-between gap-4 px-5 py-4 border-b border-[#dde5f5] bg-[#f8faff] text-left"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-full flex items-center justify-between gap-4 px-5 py-4 border-b border-[#dde5f5] bg-[#f8faff]">
+                    <button
+                      type="button"
+                      onClick={() => toggleCycleExpand(c.id)}
+                      className="flex-1 flex items-center gap-3 min-w-0 text-left"
+                    >
                       <div className="w-9 h-9 rounded-[10px] bg-[#f5f3ff] border border-[#ddd6fe] flex items-center justify-center flex-shrink-0">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
                           <circle cx="12" cy="12" r="4" />
@@ -790,23 +790,10 @@ export default function Admin360Page() {
                             {c.cycle_name}
                           </span>
                           {c.status === "Active" && (
-                            <>
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ecfdf5] border border-[#6ee7b7] text-[10px] font-semibold text-[#065f46]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
-                                Active
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  closeCycle(c.id);
-                                }}
-                                disabled={closeCycleLoading === c.id}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#0d9488] bg-[#ccfbf1] text-[10px] font-semibold text-[#0f766e] hover:bg-[#99f6e4] disabled:opacity-50"
-                              >
-                                {closeCycleLoading === c.id ? "Closing…" : "Close cycle"}
-                              </button>
-                            </>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ecfdf5] border border-[#6ee7b7] text-[10px] font-semibold text-[#065f46]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
+                              Active
+                            </span>
                           )}
                           {c.status !== "Active" && (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f1f5f9] border border-[#e2e8f0] text-[10px] font-semibold text-[#64748b]">
@@ -819,23 +806,35 @@ export default function Admin360Page() {
                           {assignments != null && ` · ${participantCount} participant${participantCount !== 1 ? "s" : ""}`}
                         </p>
                       </div>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <input
                         type="search"
                         placeholder="Search participants..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
                         className="border border-[#dde5f5] rounded-[8px] px-3 py-2 text-[11px] w-[200px] outline-none bg-white focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/10"
                       />
-                      <div
+                      {c.status === "Active" && (
+                        <button
+                          type="button"
+                          onClick={() => closeCycle(c.id)}
+                          disabled={closeCycleLoading === c.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#0d9488] bg-[#ccfbf1] text-[10px] font-semibold text-[#0f766e] hover:bg-[#99f6e4] disabled:opacity-50"
+                        >
+                          {closeCycleLoading === c.id ? "Closing…" : "Close cycle"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleCycleExpand(c.id)}
+                        aria-expanded={isExpanded}
                         className={cn("transition-transform duration-200 text-[#8a97b8]", isExpanded && "rotate-90")}
                       >
                         <ChevronDown size={20} />
-                      </div>
+                      </button>
                     </div>
-                  </button>
+                  </div>
 
                   <div
                     style={{

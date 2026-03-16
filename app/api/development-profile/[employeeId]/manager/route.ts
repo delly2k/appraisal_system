@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 
 function getSupabase() {
@@ -11,7 +11,7 @@ function getSupabase() {
 
 /** Returns true if current user (by employee_id) is the direct manager of the profile owner (by app user id). */
 async function isManagerOfProfileOwner(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<any>,
   profileOwnerUserId: string,
   currentUserEmployeeId: string | null | undefined
 ): Promise<boolean> {
@@ -21,7 +21,7 @@ async function isManagerOfProfileOwner(
     .select("employee_id")
     .eq("id", profileOwnerUserId)
     .maybeSingle();
-  const reportEmployeeId = appUser?.employee_id ?? null;
+  const reportEmployeeId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
   if (!reportEmployeeId) return false;
   const { data: lines } = await supabase
     .from("reporting_lines")

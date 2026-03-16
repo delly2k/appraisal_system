@@ -113,7 +113,7 @@ export async function calculateAppraisalScore(
     return empty;
   }
 
-  const factorIds = [...new Set(ratings.map((r) => r.factor_id))];
+  const factorIds = [...new Set((ratings ?? []).map((r) => r.factor_id))];
   const { data: factors } = await supabase
     .from("evaluation_factors")
     .select("id, category_id, weight")
@@ -139,7 +139,7 @@ export async function calculateAppraisalScore(
     leadership: { sum: 0, totalWeight: 0, sumFactor: 0, count: 0 },
   };
 
-  for (const r of ratings) {
+  for (const r of ratings ?? []) {
     const code = r.manager_rating_code ?? r.self_rating_code ?? null;
     const factorValue = code ? factorByCode.get(code) ?? 0 : 0;
     const catId = categoryIdByFactorId.get(r.factor_id);

@@ -247,7 +247,7 @@ export async function getReportingStructureFromDynamics(
     }
   }
 
-  const empRecord = emp as Record<string, unknown>;
+  const empRecord = emp as unknown as Record<string, unknown>;
   const divisionName = empRecord["_dbjhr_divisions_value@OData.Community.Display.V1.FormattedValue"] as string | undefined;
   const departmentName = empRecord["_xrm1_employee_department_id_value@OData.Community.Display.V1.FormattedValue"] as string | undefined;
   result.currentUserProfile = {

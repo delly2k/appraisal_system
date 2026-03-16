@@ -75,18 +75,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       external_id: r.achieveit_id ?? "",
     }));
 
-    type DeptRow = (typeof deptRes.data)[number] & {
-      corporate_objectives?: { achieveit_id: string | null } | null;
+    type DeptData = NonNullable<typeof deptRes.data>;
+    type DeptRow = DeptData extends (infer R)[] ? R : never;
+    type DeptRowWithCo = DeptRow & {
+      corporate_objectives?: { achieveit_id: string | null } | { achieveit_id: string | null }[] | null;
     };
-    const divisional = (deptRes.data ?? []).map((r: DeptRow) => ({
-      id: r.id,
-      type: "DIVISIONAL" as const,
-      title: r.name,
-      division: r.division ?? undefined,
-      external_id: r.achieveit_id ?? "",
-      corporate_objective_id: r.corporate_objective_id ?? undefined,
-      parent_external_id: r.corporate_objectives?.achieveit_id ?? undefined,
-    }));
+    const divisional = (deptRes.data ?? []).map((r: DeptRowWithCo) => {
+      const co = r.corporate_objectives;
+      const parentId = Array.isArray(co) ? co[0]?.achieveit_id : (co as { achieveit_id?: string | null } | null)?.achieveit_id;
+      return {
+        id: r.id,
+        type: "DIVISIONAL" as const,
+        title: r.name,
+        division: r.division ?? undefined,
+        external_id: r.achieveit_id ?? "",
+        corporate_objective_id: r.corporate_objective_id ?? undefined,
+        parent_external_id: parentId ?? undefined,
+      };
+    });
 
     return NextResponse.json([...corporate, ...divisional]);
   } catch (err) {

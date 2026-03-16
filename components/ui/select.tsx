@@ -43,14 +43,16 @@ export function Select({ value, onValueChange, children }: SelectProps) {
 interface SelectTriggerProps {
   children: React.ReactNode;
   className?: string;
+  id?: string;
 }
 
-export function SelectTrigger({ children, className }: SelectTriggerProps) {
+export function SelectTrigger({ children, className, id }: SelectTriggerProps) {
   const { open, setOpen, triggerRef } = useSelect();
 
   return (
     <button
-      ref={triggerRef}
+      id={id}
+      ref={triggerRef as React.RefObject<HTMLButtonElement>}
       type="button"
       onClick={() => setOpen(!open)}
       className={cn(

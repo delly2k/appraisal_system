@@ -392,7 +392,7 @@ export function EvidenceBuilder({
             </p>
           </div>
           <div className="divide-y divide-[#dde5f5]">
-            {diagnosis.appraisal && (
+            {Boolean(diagnosis.appraisal) && (
               <div className="px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-[.06em] text-[#8a97b8] mb-1.5">
                   Appraisal collector
@@ -416,7 +416,7 @@ export function EvidenceBuilder({
                 )}
               </div>
             )}
-            {diagnosis.calendar && (
+            {Boolean(diagnosis.calendar) && (
               <div className="px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-[.06em] text-[#8a97b8] mb-1.5">
                   Calendar collector
@@ -448,7 +448,7 @@ export function EvidenceBuilder({
                 )}
               </div>
             )}
-            {diagnosis.sharePoint && (
+            {Boolean(diagnosis.sharePoint) && (
               <div className="px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-[.06em] text-[#8a97b8] mb-1.5">
                   SharePoint / OneDrive collector
@@ -467,7 +467,7 @@ export function EvidenceBuilder({
                 </div>
               </div>
             )}
-            {diagnosis.clustering && (
+            {Boolean(diagnosis.clustering) && (
               <div className="px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-[.06em] text-[#8a97b8] mb-1.5">
                   Clustering engine
@@ -483,9 +483,9 @@ export function EvidenceBuilder({
                     </span>
                   ))}
                 </div>
-                {(diagnosis.clustering as { disqualified?: unknown[] })?.disqualified?.length > 0 && (
+                {((diagnosis.clustering as { disqualified?: unknown[] })?.disqualified?.length ?? 0) > 0 && (
                   <div className="space-y-1">
-                    {((diagnosis.clustering as { disqualified: Array<{ topic: string; itemCount: number; score: number; reason: string }> }).disqualified).map((d, i) => (
+                    {((diagnosis.clustering as { disqualified?: Array<{ topic: string; itemCount: number; score: number; reason: string }> }).disqualified)?.map((d, i) => (
                       <div
                         key={i}
                         className="flex items-center gap-2 text-[10px] text-[#8a97b8] bg-[#fff1f2] border border-[#fecaca] rounded-[6px] px-2.5 py-1.5"
