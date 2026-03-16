@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AchieveIt API Tester for DBJ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Monaco, monospace;
+      background: #1a1d23;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: #111318;
+      border-right: 1px solid #2d333b;
+      padding: 12px 0;
+    }
+    .sidebar h2 {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin: 0 16px 10px;
+    }
+    .endpoint {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+    .endpoint:hover { background: #1e2229; }
+    .endpoint.active { background: #1e2229; border-left-color: #7c3aed; }
+    .method {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .method.get { background: #166534; color: #dcfce7; }
+    .method.post { background: #6b21a8; color: #f3e8ff; }
+    .endpoint-label { font-size: 13px; color: #e2e8f0; }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 20px;
+    }
+    .request-panel {
+      background: #111318;
+      border: 1px solid #2d333b;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .request-panel h3 { margin: 0 0 12px; font-size: 12px; color: #94a3b8; }
+    .url-bar {
+      width: 100%;
+      padding: 10px 12px;
+      background: #1a1d23;
+      border: 1px solid #2d333b;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .field input, .field textarea {
+      width: 100%;
+      padding: 8px 10px;
+      background: #1a1d23;
+      border: 1px solid #2d333b;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .field textarea { min-height: 120px; resize: vertical; }
+    .send-btn {
+      padding: 10px 24px;
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .send-btn:hover { background: #6d28d9; }
+    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .response-panel {
+      flex: 1;
+      min-height: 200px;
+      background: #111318;
+      border: 1px solid #2d333b;
+      border-radius: 8px;
+      padding: 16px;
+      overflow: auto;
+    }
+    .response-panel h3 { margin: 0 0 10px; font-size: 12px; color: #94a3b8; }
+    .meta { font-size: 11px; color: #64748b; margin-bottom: 10px; }
+    .response-body {
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .curl-block {
+      background: #1a1d23;
+      border: 1px solid #2d333b;
+      border-radius: 6px;
+      padding: 12px;
+      margin-top: 10px;
+      font-size: 11px;
+      overflow-x: auto;
+    }
+    .curl-block code { color: #a5f3fc; }
+    .key { color: #c4b5fd; }
+    .string { color: #86efac; }
+    .number { color: #fcd34d; }
+    .bool { color: #f472b6; }
+    .null { color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Endpoints</h2>
+      <div class="endpoint active" data-id="export-plans">
+        <span class="method get">GET</span>
+        <span class="endpoint-label">Export Plan Items</span>
+      </div>
+      <div class="endpoint" data-id="progress-updates">
+        <span class="method post">POST</span>
+        <span class="endpoint-label">Progress Updates</span>
+      </div>
+      <div class="endpoint" data-id="metric-updates">
+        <span class="method post">POST</span>
+        <span class="endpoint-label">Metric Updates</span>
+      </div>
+      <div class="endpoint" data-id="import-status">
+        <span class="method get">GET</span>
+        <span class="endpoint-label">Check Job Status</span>
+      </div>
+      <div class="endpoint" data-id="list-plans">
+        <span class="method get">GET</span>
+        <span class="endpoint-label">List plans (API key access)</span>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="request-panel">
+        <h3>Request</h3>
+        <input type="text" class="url-bar" id="urlBar" readonly />
+        <div id="requestFields"></div>
+        <button class="send-btn" id="sendBtn">Send</button>
+      </div>
+      <div class="response-panel">
+        <h3>Response</h3>
+        <div class="meta" id="responseMeta">—</div>
+        <div class="response-body" id="responseBody">Send a request to see the response.</div>
+        <div class="curl-block" id="curlBlock" style="display:none;"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_KEY = "65409926-0809-41aa-ab3b-cbb625a9ba78";
+    const AUTH_HEADER = "API-KEY " + API_KEY;
+
+    const endpoints = {
+      "export-plans": {
+        method: "GET",
+        baseUrl: "/api/achieveit/plans/{planId}",
+        params: [{ name: "planId", label: "Plan ID", type: "text" }],
+      },
+      "progress-updates": {
+        method: "POST",
+        baseUrl: "https://api.achieveit.com/imports/progress-updates",
+        params: [{ name: "body", label: "JSON body", type: "textarea" }],
+      },
+      "metric-updates": {
+        method: "POST",
+        baseUrl: "https://api.achieveit.com/imports/metric-updates",
+        params: [{ name: "body", label: "JSON body", type: "textarea" }],
+      },
+      "import-status": {
+        method: "GET",
+        baseUrl: "https://api.achieveit.com/imports/status/{jobId}",
+        params: [{ name: "jobId", label: "Job ID", type: "text" }],
+      },
+      "list-plans": {
+        method: "GET",
+        baseUrl: "/api/achieveit/plans",
+        params: [],
+      },
+    };
+
+    let currentId = "export-plans";
+    const urlBar = document.getElementById("urlBar");
+    const requestFields = document.getElementById("requestFields");
+    const sendBtn = document.getElementById("sendBtn");
+    const responseMeta = document.getElementById("responseMeta");
+    const responseBody = document.getElementById("responseBody");
+    const curlBlock = document.getElementById("curlBlock");
+
+    function renderUrl() {
+      const ep = endpoints[currentId];
+      let url = ep.baseUrl;
+      ep.params.forEach((p) => {
+        const el = document.getElementById("param_" + p.name);
+        const val = el ? el.value.trim() : "";
+        url = url.replace("{" + p.name + "}", encodeURIComponent(val || "{" + p.name + "}"));
+      });
+      urlBar.value = url;
+      return url;
+    }
+
+    function renderRequestFields() {
+      const ep = endpoints[currentId];
+      requestFields.innerHTML = "";
+      ep.params.forEach((p) => {
+        const div = document.createElement("div");
+        div.className = "field";
+        const label = document.createElement("label");
+        label.textContent = p.label;
+        label.htmlFor = "param_" + p.name;
+        div.appendChild(label);
+        if (p.type === "textarea") {
+          const ta = document.createElement("textarea");
+          ta.id = "param_" + p.name;
+          ta.placeholder = p.name === "body" ? '{"key": "value"}' : "";
+          div.appendChild(ta);
+        } else {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.id = "param_" + p.name;
+          input.placeholder = p.name;
+          div.appendChild(input);
+        }
+        requestFields.appendChild(div);
+      });
+      const inputEvent = () => { renderUrl(); };
+      requestFields.querySelectorAll("input, textarea").forEach((el) => el.addEventListener("input", inputEvent));
+      renderUrl();
+    }
+
+    function switchEndpoint(id) {
+      currentId = id;
+      document.querySelectorAll(".endpoint").forEach((e) => e.classList.toggle("active", e.dataset.id === id));
+      renderRequestFields();
+      responseMeta.textContent = "—";
+      responseBody.textContent = "Send a request to see the response.";
+      curlBlock.style.display = "none";
+    }
+
+    function syntaxHighlight(jsonStr) {
+      try {
+        const obj = typeof jsonStr === "string" ? JSON.parse(jsonStr) : jsonStr;
+        const str = JSON.stringify(obj, null, 2);
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/"([^"]+)":/g, '<span class="key">"$1"</span>:')
+          .replace(/: "([^"]*)"/g, (_, s) => ': <span class="string">"' + s.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '"</span>')
+          .replace(/: (\d+\.?\d*)/g, ': <span class="number">$1</span>')
+          .replace(/: (true|false)/g, ': <span class="bool">$1</span>')
+          .replace(/: (null)/g, ': <span class="null">$1</span>');
+      } catch {
+        return String(jsonStr).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      }
+    }
+
+    function buildCurl(url, method, body) {
+      let curl = 'curl -X ' + method + ' "' + url + '" \\\n  -H "Authorization: ' + AUTH_HEADER + '" \\\n  -H "Content-Type: application/json"';
+      if (body && (method === "POST" || method === "PUT")) {
+        curl += ' \\\n  -d \'' + body.replace(/'/g, "'\\''") + "'";
+      }
+      return curl;
+    }
+
+    async function sendRequest() {
+      const ep = endpoints[currentId];
+      let url = renderUrl();
+      if (url.includes("{") && url.includes("}")) {
+        responseMeta.textContent = "Fill in all path parameters.";
+        responseBody.textContent = "";
+        return;
+      }
+      sendBtn.disabled = true;
+      responseMeta.textContent = "Sending…";
+      responseBody.textContent = "";
+      curlBlock.style.display = "none";
+      const start = performance.now();
+
+      let body = null;
+      if (ep.method === "POST") {
+        const bodyParam = ep.params.find((p) => p.type === "textarea");
+        const raw = bodyParam ? (document.getElementById("param_" + bodyParam.name)?.value || "").trim() : "";
+        body = raw || "{}";
+      }
+
+      try {
+        const opts = {
+          method: ep.method,
+          headers: {
+            "Authorization": AUTH_HEADER,
+            "Content-Type": "application/json",
+          },
+        };
+        if (body) opts.body = body;
+        const res = await fetch(url, opts);
+        const elapsed = Math.round(performance.now() - start);
+        const text = await res.text();
+        responseMeta.textContent = "Status: " + res.status + " · " + elapsed + " ms";
+        try {
+          const parsed = JSON.parse(text);
+          responseBody.innerHTML = syntaxHighlight(JSON.stringify(parsed, null, 2));
+        } catch {
+          responseBody.textContent = text || "(empty body)";
+        }
+        curlBlock.style.display = "none";
+      } catch (err) {
+        const elapsed = Math.round(performance.now() - start);
+        responseMeta.textContent = "Error: " + (err.message || "Request failed") + " · " + elapsed + " ms";
+        if (err.message && (err.message.includes("CORS") || err.message.includes("Failed to fetch"))) {
+          curlBlock.style.display = "block";
+          curlBlock.innerHTML = "<strong>Copy and run in terminal (CORS bypass):</strong><br><code>" + buildCurl(url, ep.method, body).replace(/\n/g, "<br>") + "</code>";
+        } else {
+          responseBody.textContent = String(err.message || err);
+        }
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    document.querySelectorAll(".endpoint").forEach((el) => {
+      el.addEventListener("click", () => switchEndpoint(el.dataset.id));
+    });
+    sendBtn.addEventListener("click", sendRequest);
+    renderRequestFields();
+    // On load: use API key to pull plan information so user can see the API works
+    const planIdInput = document.getElementById("param_planId");
+    if (planIdInput) {
+      planIdInput.value = "1";
+      renderUrl();
+      sendRequest();
+    }
+  </script>
+</body>
+</html>
