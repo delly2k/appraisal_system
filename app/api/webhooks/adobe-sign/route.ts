@@ -5,6 +5,11 @@ import { sendNotification, type SupabaseLike } from "@/lib/notifications";
 
 // Adobe Sign webhook verification expects client ID echoed in response header.
 export async function GET(req: NextRequest) {
+  const verificationCode = req.nextUrl.searchParams.get("verificationCode");
+  if (verificationCode) {
+    return new NextResponse(verificationCode, { status: 200 });
+  }
+
   const clientId = req.headers.get("x-adobesign-clientid");
   const response = new NextResponse("Webhook received", { status: 200 });
   response.headers.set("X-AdobeSign-ClientId", clientId ?? "");

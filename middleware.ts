@@ -10,13 +10,14 @@ export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
   const isAuthRoute = pathname.startsWith("/api/auth") || pathname === "/login";
+  const isWebhookRoute = pathname.startsWith("/api/webhooks/adobe-sign");
   const isPublic =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.includes(".");
   const isReportingTest = pathname === "/reporting-test";
 
-  if (isAuthRoute || isPublic || isReportingTest) {
+  if (isAuthRoute || isWebhookRoute || isPublic || isReportingTest) {
     return NextResponse.next();
   }
 
@@ -44,10 +45,11 @@ export const config = {
     /*
      * Match all paths except:
      * - api/auth (NextAuth)
+     * - api/webhooks/adobe-sign* (Adobe Sign webhook verification/callback)
      * - login
      * - _next (Next.js)
      * - static files
      */
-    "/((?!api/auth|login|_next/static|_next/image|favicon.ico|.*\\.).*)",
+    "/((?!api/auth|api/webhooks/adobe-sign|login|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };
