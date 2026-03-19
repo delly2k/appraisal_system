@@ -3,9 +3,19 @@ import { createClient } from "@supabase/supabase-js";
 import { downloadSignedPDF } from "@/lib/adobe-sign";
 import { sendNotification, type SupabaseLike } from "@/lib/notifications";
 
-// Adobe Sign sends a GET request to verify webhook reachability.
-export async function GET() {
-  return new Response("OK", { status: 200 });
+// Adobe Sign webhook verification expects client ID echoed back.
+export async function GET(request: Request) {
+  const clientId = request.headers.get("X-AdobeSign-ClientId");
+  return new Response(
+    JSON.stringify({ xAdobeSignClientId: clientId }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "X-AdobeSign-ClientId": clientId || "",
+      },
+    }
+  );
 }
 
 function getSupabaseAdmin() {
