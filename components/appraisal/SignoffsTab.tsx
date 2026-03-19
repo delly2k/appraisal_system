@@ -144,6 +144,8 @@ export function SignoffsTab({
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [isSyncingAdobe, setIsSyncingAdobe] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
@@ -266,6 +268,29 @@ export function SignoffsTab({
       } else alert(data.error ?? "Failed to cancel");
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const canSyncWithAdobe = isHR || isEmployee || isAppraisalManager;
+
+  const handleSyncAdobeSign = async () => {
+    setSyncError(null);
+    setIsSyncingAdobe(true);
+    try {
+      const res = await fetch(`/api/appraisals/${appraisalId}/check-adobe-status`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncError(typeof data.error === "string" ? data.error : "Sync failed");
+        return;
+      }
+      await refetchStatus();
+    } catch {
+      setSyncError("Sync failed");
+    } finally {
+      setIsSyncingAdobe(false);
     }
   };
 
@@ -498,11 +523,27 @@ export function SignoffsTab({
             </button>
           </div>
 
-          {canCancel && (
-            <div className="flex justify-end">
-              <button type="button" onClick={() => setShowCancelModal(true)} className="text-[11px] text-[#dc2626] hover:underline">
-                Cancel sign-off
-              </button>
+          {(canSyncWithAdobe || canCancel) && (
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex flex-wrap items-center justify-end gap-4">
+                {canSyncWithAdobe && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSyncAdobeSign()}
+                    disabled={isSyncingAdobe}
+                    className="flex items-center gap-1.5 text-[11px] text-[#8a97b8] hover:text-[#0f1f3d] transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={isSyncingAdobe ? "animate-spin" : ""} />
+                    {isSyncingAdobe ? "Syncing..." : "Sync with Adobe Sign"}
+                  </button>
+                )}
+                {canCancel && (
+                  <button type="button" onClick={() => setShowCancelModal(true)} className="text-[11px] text-[#dc2626] hover:underline">
+                    Cancel sign-off
+                  </button>
+                )}
+              </div>
+              {syncError && <p className="text-[10px] text-[#dc2626] max-w-md text-right">{syncError}</p>}
             </div>
           )}
         </div>
