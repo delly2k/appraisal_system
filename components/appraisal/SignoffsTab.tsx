@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Check, Clock, Info, FileText, Download, XCircle, AlertCircle, Shield } from "lucide-react";
+import { Check, Clock, Info, FileText, Download, XCircle, AlertCircle, Shield, RefreshCw } from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { AppraisalData, AppraisalAgreement } from "./AppraisalTabs";
 
@@ -137,6 +137,7 @@ export function SignoffsTab({
     signerChain?: { role: "EMPLOYEE" | "MANAGER" | "HOD"; name: string; email: string | null; signedAt: string | null }[];
     scores: { workplan: number; competency: number; overall: number; ratingLabel: string };
   } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [managerComments, setManagerComments] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
@@ -149,16 +150,32 @@ export function SignoffsTab({
     setPortalTarget(document.getElementById("manager-review-actions"));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/appraisals/${appraisalId}/signoff/status?showLeadership=${showLeadership ? "true" : "false"}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setStatusData(data);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+  const refetchStatus = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const r = await fetch(
+        `/api/appraisals/${appraisalId}/signoff/status?showLeadership=${showLeadership ? "true" : "false"}`,
+        { cache: "no-store" }
+      );
+      const data = r.ok ? await r.json() : null;
+      if (data) setStatusData(data);
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [appraisalId, showLeadership]);
+
+  useEffect(() => {
+    void refetchStatus();
+  }, [refetchStatus]);
+
+  useEffect(() => {
+    const agreementStatus = statusData?.agreement?.status;
+    if (agreementStatus !== "OUT_FOR_SIGNATURE") return;
+    const id = setInterval(() => {
+      void refetchStatus();
+    }, 10000);
+    return () => clearInterval(id);
+  }, [statusData?.agreement?.status, refetchStatus]);
 
   const agreement = (statusData?.agreement ?? appraisal.agreement) as AppraisalAgreement | undefined | null;
   const employee = statusData?.signers?.employee ?? { full_name: appraisal.employeeName, email: appraisal.employeeEmail ?? null };
@@ -394,22 +411,33 @@ export function SignoffsTab({
             <div className="flex items-center justify-between gap-3 px-5 py-4 bg-[#f8faff] border-b border-[#dde5f5]">
               <div>
                 <p className="text-[13px] font-semibold text-[#0f1f3d]">
-                  Sign-off in progress · {signaturesCollected} of 3 signed
+                  Sign-off in progress · {signaturesCollected} of {totalSigners} signed
                 </p>
                 <p className="text-[10px] text-[#8a97b8] mt-0.5">
                   Adobe Sign · Sent {formatDate(agreement.created_at)} · Expires {formatDate(expiryDate?.toISOString())} · Weekly reminders active
                 </p>
               </div>
-              <div className="flex items-center gap-1.5">
-                {signerChain.map((s, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "w-2.5 h-2.5 rounded-full transition-colors",
-                      s.signedAt ? "bg-[#059669]" : i === signaturesCollected ? "bg-[#d97706] animate-pulse" : "bg-[#dde5f5]"
-                    )}
-                  />
-                ))}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void refetchStatus()}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-1.5 text-xs text-[#8a97b8] hover:text-[#0f1f3d] transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+                  {isRefreshing ? "Refreshing..." : "Refresh"}
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {signerChain.map((s, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "w-2.5 h-2.5 rounded-full transition-colors",
+                        s.signedAt ? "bg-[#059669]" : i === signaturesCollected ? "bg-[#d97706] animate-pulse" : "bg-[#dde5f5]"
+                      )}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
             {signerChain.map((s, idx) => (
