@@ -1,6 +1,6 @@
 /**
- * 9-phase appraisal workflow: transition rules and timeline.
- * Use for all status changes; no skipping steps.
+ * Appraisal workflow: transition rules.
+ * PENDING_APPROVAL → IN_PROGRESS on workplan approval; IN_PROGRESS → SELF_ASSESSMENT when employee starts self-assessment.
  */
 
 import type { AppraisalStatus } from "@/types/appraisal";
@@ -8,10 +8,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const VALID_TRANSITIONS: Record<AppraisalStatus, AppraisalStatus[]> = {
   DRAFT: ["PENDING_APPROVAL"],
-  PENDING_APPROVAL: ["SELF_ASSESSMENT", "DRAFT"],
+  PENDING_APPROVAL: ["IN_PROGRESS", "DRAFT"],
+  IN_PROGRESS: ["SELF_ASSESSMENT"],
   SELF_ASSESSMENT: ["MANAGER_REVIEW"],
   SUBMITTED: ["MANAGER_REVIEW"],
-  MANAGER_REVIEW: ["PENDING_SIGNOFF", "SELF_ASSESSMENT"],
+  MANAGER_REVIEW: ["SELF_ASSESSMENT"],
   PENDING_SIGNOFF: ["HOD_REVIEW", "MANAGER_REVIEW"],
   HOD_REVIEW: ["HR_REVIEW"],
   HR_REVIEW: ["COMPLETE"],

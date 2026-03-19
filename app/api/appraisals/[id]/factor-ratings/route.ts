@@ -57,7 +57,36 @@ export async function GET(
       .eq("appraisal_id", appraisalId);
 
     if (rateErr) return NextResponse.json({ error: rateErr.message }, { status: 400 });
-    return NextResponse.json({ ratings: ratingData ?? [] });
+
+    const { data: categories } = await supabase
+      .from("evaluation_categories")
+      .select("id, category_type")
+      .in("category_type", ["core", "productivity", "leadership"])
+      .eq("active", true);
+
+    const catIds = (categories ?? []).map((c: { id: string }) => c.id);
+    let factorRows: { id: string; category_id: string; weight: number | null }[] = [];
+    if (catIds.length > 0) {
+      const { data: factors } = await supabase
+        .from("evaluation_factors")
+        .select("id, category_id, weight")
+        .in("category_id", catIds)
+        .eq("active", true);
+      factorRows = (factors ?? []) as { id: string; category_id: string; weight: number | null }[];
+    }
+
+    const factorMeta: Record<string, { category_id: string; weight: number | null }> = Object.fromEntries(
+      factorRows.map((f) => [f.id, { category_id: f.category_id, weight: f.weight }])
+    );
+    const categoryTypes: Record<string, string> = Object.fromEntries(
+      (categories ?? []).map((c: { id: string; category_type: string }) => [c.id, c.category_type])
+    );
+
+    return NextResponse.json({
+      ratings: ratingData ?? [],
+      factorMeta,
+      categoryTypes,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

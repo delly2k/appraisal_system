@@ -3,10 +3,11 @@
  * Aligned with Supabase enums: appraisal_status, cycle_status, cycle_type, appraisal_purpose.
  */
 
-/** 9-phase workflow status (DBJ appraisal process) */
+/** Workflow status (DBJ appraisal process). IN_PROGRESS = check-ins stage after workplan approval. */
 export const APPRAISAL_STATUS = [
   "DRAFT",
   "PENDING_APPROVAL",
+  "IN_PROGRESS",
   "SELF_ASSESSMENT",
   "SUBMITTED",
   "MANAGER_REVIEW",
@@ -22,7 +23,7 @@ export const CYCLE_STATUS = ["draft", "open", "closed", "archived"] as const;
 
 export type CycleStatus = (typeof CYCLE_STATUS)[number];
 
-export const CYCLE_TYPE = ["quarterly", "mid_year", "annual"] as const;
+export const CYCLE_TYPE = ["annual"] as const;
 
 export type CycleType = (typeof CYCLE_TYPE)[number];
 
@@ -58,7 +59,7 @@ export interface AppraisalRow {
   manager_employee_id: string | null;
   division_id: string | null;
   review_type: CycleType;
-  /** 1-4 for quarterly check-ins; null for mid_year/annual */
+  /** 1-4 for quarterly check-ins; null for annual */
   quarter?: number | null;
   purpose: AppraisalPurpose;
   purpose_other: string | null;
@@ -86,19 +87,12 @@ export interface WorkplanRow {
   updated_at: string;
 }
 
-/** Dashboard payload for GET /api/dashboard/[employeeId] */
+/** Dashboard payload for GET /api/dashboard/[employeeId]. checkins added in check-in prompt later. */
 export interface DashboardEmployeePayload {
   fiscal_year: string;
   cycle_id: string;
   workplan_status: string;
-  mid_year: { status: AppraisalStatus } | null;
   annual: { status: AppraisalStatus } | null;
-  checkins: {
-    Q1: { status: AppraisalStatus } | "NOT_CREATED";
-    Q2: { status: AppraisalStatus } | "NOT_CREATED";
-    Q3: { status: AppraisalStatus } | "NOT_CREATED";
-    Q4: { status: AppraisalStatus } | "NOT_CREATED";
-  };
 }
 
 export function isAppraisalStatus(s: string): s is AppraisalStatus {

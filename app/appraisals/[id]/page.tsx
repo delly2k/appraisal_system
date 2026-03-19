@@ -5,9 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import { getReportingStructureFromDynamics, getReportingStructure } from "@/lib/reporting-structure";
 import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 import type { AppraisalStatus } from "@/types/appraisal";
-import { AppraisalTabs, AppraisalData } from "@/components/appraisal/AppraisalTabs";
+import { AppraisalTabs, AppraisalData, type AppraisalAgreement } from "@/components/appraisal/AppraisalTabs";
 import { CompletionBarWrapperClient } from "@/components/appraisal/CompletionBarWrapperClient";
-
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -33,7 +32,7 @@ async function getAppraisalDetail(
 
   const { data: emp } = await supabase
     .from("employees")
-    .select("full_name")
+    .select("full_name, email")
     .eq("employee_id", appraisal.employee_id)
     .single();
 
@@ -66,6 +65,61 @@ async function getAppraisalDetail(
     }));
   }
 
+  let agreement: AppraisalAgreement | null = null;
+  let managerName = "—";
+  let managerEmail: string | null = null;
+  let employeeEmail: string | null = emp?.email ?? null;
+  let hrOfficerName = "—";
+  let hrOfficerEmail: string | null = null;
+
+  const needAgreement =
+    status === "MANAGER_REVIEW" ||
+    status === "PENDING_SIGNOFF" ||
+    status === "HOD_REVIEW" ||
+    status === "HR_REVIEW" ||
+    status === "COMPLETE";
+  if (needAgreement) {
+    const { data: agg } = await supabase
+      .from("appraisal_agreements")
+      .select("*")
+      .eq("appraisal_id", appraisal.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (agg) agreement = agg as AppraisalAgreement;
+
+    if (appraisal.manager_employee_id) {
+      const { data: mgrRow } = await supabase
+        .from("employees")
+        .select("full_name, email")
+        .eq("employee_id", appraisal.manager_employee_id)
+        .single();
+      if (mgrRow) {
+        managerName = mgrRow.full_name ?? "—";
+        managerEmail = mgrRow.email ?? null;
+      }
+    }
+    const { data: hrRow } = await supabase
+      .from("app_users")
+      .select("employee_id, email, display_name")
+      .in("role", ["hr", "admin"])
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (hrRow) {
+      hrOfficerEmail = hrRow.email ?? null;
+      hrOfficerName = hrRow.display_name ?? hrRow.email ?? "—";
+      if (hrRow.employee_id) {
+        const { data: hrEmp } = await supabase
+          .from("employees")
+          .select("full_name")
+          .eq("employee_id", hrRow.employee_id)
+          .single();
+        if (hrEmp?.full_name) hrOfficerName = hrEmp.full_name;
+      }
+    }
+  }
+
   const cycleData = cycle as Record<string, unknown> | null;
   return {
     id: appraisal.id,
@@ -75,6 +129,11 @@ async function getAppraisalDetail(
     status,
     is_management: appraisal.is_management ?? false,
     employeeName: emp?.full_name ?? "—",
+    employeeEmail,
+    managerName,
+    managerEmail,
+    hrOfficerName,
+    hrOfficerEmail,
     cycleName: cycle?.name ?? "—",
     cycleStartDate: cycleData?.start_date != null ? String(cycleData.start_date) : undefined,
     cycleEndDate: cycleData?.end_date != null ? String(cycleData.end_date) : undefined,
@@ -82,6 +141,7 @@ async function getAppraisalDetail(
     cyclePhase: cycleData?.phase != null ? String(cycleData.phase) : "",
     approvals,
     signoffs,
+    agreement,
   };
 }
 
@@ -106,6 +166,7 @@ function canAccessAppraisal(
 const statusConfig: Record<string, { bg: string; text: string; border: string; dot: string; label: string }> = {
   DRAFT: { bg: "#f1f5f9", text: "#64748b", border: "#e2e8f0", dot: "#94a3b8", label: "Draft" },
   PENDING_APPROVAL: { bg: "#fffbeb", text: "#92400e", border: "#fde68a", dot: "#f59e0b", label: "Pending Approval" },
+  IN_PROGRESS: { bg: "#f0fdfa", text: "#0f766e", border: "#99f6e4", dot: "#0d9488", label: "In progress" },
   SELF_ASSESSMENT: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe", dot: "#3b82f6", label: "Self Assessment" },
   SUBMITTED: { bg: "#f0fdf4", text: "#166534", border: "#bbf7d0", dot: "#22c55e", label: "Submitted" },
   MANAGER_REVIEW: { bg: "#f3e8ff", text: "#6d28d9", border: "#ddd6fe", dot: "#7c3aed", label: "Manager Review" },
@@ -118,12 +179,13 @@ const statusConfig: Record<string, { bg: string; text: string; border: string; d
 const WORKFLOW_STEPS = [
   { status: "DRAFT", label: "Draft", short: "1" },
   { status: "PENDING_APPROVAL", label: "Approval", short: "2" },
-  { status: "SELF_ASSESSMENT", label: "Self Assessment", short: "3" },
-  { status: "MANAGER_REVIEW", label: "Manager Review", short: "4" },
-  { status: "PENDING_SIGNOFF", label: "Sign-off", short: "5" },
-  { status: "HOD_REVIEW", label: "HOD Review", short: "6" },
-  { status: "HR_REVIEW", label: "HR Review", short: "7" },
-  { status: "COMPLETE", label: "Complete", short: "8" },
+  { status: "IN_PROGRESS", label: "In progress", short: "3" },
+  { status: "SELF_ASSESSMENT", label: "Self Assessment", short: "4" },
+  { status: "MANAGER_REVIEW", label: "Manager Review", short: "5" },
+  { status: "PENDING_SIGNOFF", label: "Sign-off", short: "6" },
+  { status: "HOD_REVIEW", label: "HOD Review", short: "7" },
+  { status: "HR_REVIEW", label: "HR Review", short: "8" },
+  { status: "COMPLETE", label: "Complete", short: "9" },
 ] as const;
 
 function formatReviewType(type?: string): string {
@@ -287,32 +349,33 @@ export default async function AppraisalDetailPage({
           </div>
         </div>
 
-        {/* Status badge */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "5px 14px",
-            borderRadius: "20px",
-            fontSize: "12px",
-            fontWeight: 600,
-            background: status.bg,
-            color: status.text,
-            border: `1px solid ${status.border}`,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
           <span
             style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              background: status.dot,
-              display: "inline-block",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "5px 14px",
+              borderRadius: "20px",
+              fontSize: "12px",
+              fontWeight: 600,
+              background: status.bg,
+              color: status.text,
+              border: `1px solid ${status.border}`,
             }}
-          />
-          {status.label}
-        </span>
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: status.dot,
+                display: "inline-block",
+              }}
+            />
+            {status.label}
+          </span>
+        </div>
       </div>
 
       {/* Stepper + tabs: full-width section */}

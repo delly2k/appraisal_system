@@ -90,7 +90,11 @@ export const GRADE_STYLES: Record<
 
 // ── Average ratings from tab data (fallback when no weights) ──
 function avgRating(items: RatingItem[]): number {
-  const RATING_MAP: Record<string, number> = { A: 97.5, B: 92.5, C: 85, D: 74.5, E: 50 };
+  const RATING_MAP: Record<string, number> = {
+    A: 97.5, B: 92.5, C: 85, D: 74.5, E: 50,
+    "1": 10, "2": 20, "3": 30, "4": 40, "5": 50,
+    "6": 60, "7": 70, "8": 80, "9": 90, "10": 100,
+  };
   const rated = items
     .map((i) => RATING_MAP[i.manager_rating ?? i.self_rating ?? ""] ?? null)
     .filter((v): v is number => v !== null);
@@ -98,8 +102,12 @@ function avgRating(items: RatingItem[]): number {
   return rated.reduce((a, b) => a + b, 0) / rated.length;
 }
 
-// ── Factor for letter grade (matches rating_scale: A=1, B=0.8, C=0.6, D=0.4, E=0.2) ──
-const GRADE_FACTOR: Record<string, number> = { A: 1, B: 0.8, C: 0.6, D: 0.4, E: 0.2 };
+// ── Factor for grade (A–E legacy; 1–10 matches rating_scale table after migration 0054) ──
+const GRADE_FACTOR: Record<string, number> = {
+  A: 1, B: 0.8, C: 0.6, D: 0.4, E: 0.2,
+  "1": 0.1, "2": 0.2, "3": 0.3, "4": 0.4, "5": 0.5,
+  "6": 0.6, "7": 0.7, "8": 0.8, "9": 0.9, "10": 1,
+};
 
 /** Weighted section score 0–100: sum(weight × factor(grade)) / totalWeight × 100. */
 function weightedSectionScore(items: WeightedRatingItem[]): number {
@@ -138,13 +146,15 @@ export function calcSummary(props: SummaryCalcProps): SummaryResult {
     ? [
         { key: "cc", name: "Core Competencies", sub: "Value-based & soft skill ratings", weight: 10, actual: sectionActual(competencies) },
         { key: "prod", name: "Productivity Rating", sub: "Output and efficiency assessment", weight: 10, actual: sectionActual(productivity) },
+        { key: "technical", name: "Technical Competency", sub: "Role-specific technical skills", weight: 10, actual: sectionActual(technical) },
         { key: "leadership", name: "Leadership & Management", sub: "Team management effectiveness", weight: 10, actual: sectionActual(leadership ?? []) },
-        { key: "workplan", name: "Workplan Achievement", sub: "KPI results vs. agreed targets", weight: 70, actual: Math.round(wpActual) },
+        { key: "workplan", name: "Workplan Achievement", sub: "KPI results vs. agreed targets", weight: 60, actual: Math.round(wpActual) },
       ]
     : [
         { key: "cc", name: "Core Competencies", sub: "Value-based & soft skill ratings", weight: 10, actual: sectionActual(competencies) },
         { key: "prod", name: "Productivity Rating", sub: "Output and efficiency assessment", weight: 10, actual: sectionActual(productivity) },
-        { key: "workplan", name: "Workplan Achievement", sub: "KPI results vs. agreed targets", weight: 80, actual: Math.round(wpActual) },
+        { key: "technical", name: "Technical Competency", sub: "Role-specific technical skills", weight: 10, actual: sectionActual(technical) },
+        { key: "workplan", name: "Workplan Achievement", sub: "KPI results vs. agreed targets", weight: 70, actual: Math.round(wpActual) },
       ];
 
   const withScores: ComponentScore[] = components.map((c) => ({

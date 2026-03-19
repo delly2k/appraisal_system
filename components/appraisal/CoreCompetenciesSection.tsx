@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { RatingButtons } from "./RatingButtons";
 import {
-  RatingPillGroup,
   RatingGradeChip,
   RatingLegend,
-  isGrade,
   VarianceChip,
 } from "./RatingPillGroup";
 
@@ -42,6 +41,8 @@ interface CoreCompetenciesSectionProps {
   canEditWeights?: boolean;
   /** Optional: notify parent when dirty state changes (for tab navigation guard). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Optional: register save function for parent (e.g. unsaved-changes modal Save). */
+  registerSave?: (save: (() => Promise<void>) | null) => void;
 }
 
 const SaveIcon = () => (
@@ -87,8 +88,11 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px solid #dde5f5",
 };
 
-/** Grade factor for row score: weight × factor(manager_rating). Matches rating_scale. */
-const GRADE_FACTOR: Record<string, number> = { A: 1, B: 0.8, C: 0.6, D: 0.4, E: 0.2 };
+/** Get factor from rating scale (1-10 codes). Row score = weight × factor. */
+function getFactorFromScale(code: string | null, scale: { code: string; factor: number }[]): number {
+  if (!code) return 0;
+  return scale.find((s) => s.code === code)?.factor ?? 0;
+}
 
 const inputStyle: React.CSSProperties = {
   padding: "6px 8px",
@@ -122,6 +126,7 @@ export function CoreCompetenciesSection({
   canEditManagerRatings,
   canEditWeights = false,
   onDirtyChange,
+  registerSave,
 }: CoreCompetenciesSectionProps) {
   const [isDirty, setIsDirty] = useState(false);
   useUnsavedChanges(isDirty);
@@ -260,6 +265,12 @@ export function CoreCompetenciesSection({
     }
   }, [appraisalId, ratings, factors]);
 
+  useEffect(() => {
+    if (!registerSave) return;
+    registerSave(saveRatings);
+    return () => registerSave(null);
+  }, [registerSave, saveRatings]);
+
   const canEdit = canEditSelfRatings || canEditManagerRatings || canEditWeights;
   const totalWeight = factors.reduce(
     (sum, factor) => sum + (ratings.get(factor.id)?.weight != null ? Number(ratings.get(factor.id)!.weight) : factor.weight ?? 0),
@@ -315,7 +326,7 @@ export function CoreCompetenciesSection({
                 Core Competencies
               </div>
               <div style={{ fontSize: "12px", color: "#8a97b8", marginTop: "1px" }}>
-                Value-based and soft skill competencies that apply to all employees
+                Value-based and soft skill competencies · Rate 1–10
                 {canEditWeights && factors.length > 0 && (
                   <span style={{ marginLeft: "8px", color: weightValid ? "#15803d" : "#b91c1c" }}>
                     — Total weight: {totalWeight}%. Must equal 100%.
@@ -363,7 +374,7 @@ export function CoreCompetenciesSection({
                 <tr>
                   <th style={{ ...thStyle, minWidth: "200px" }}>Competency</th>
                   <th style={{ ...thStyle, width: "80px" }}>Weight</th>
-                  <th style={{ ...thStyle, minWidth: "340px", textAlign: "center" }}>Self Rating</th>
+                  <th style={{ ...thStyle, minWidth: "340px", textAlign: "center" }}>Self Rating (1–10)</th>
                   <th style={{ ...thStyle, minWidth: "200px" }}>Self Comments</th>
                   <th style={{ ...thStyle, width: "140px", textAlign: "center" }}>Manager Rating</th>
                   <th style={{ ...thStyle, minWidth: "200px" }}>Manager Comments</th>
@@ -375,7 +386,7 @@ export function CoreCompetenciesSection({
                   const rating = ratings.get(factor.id);
                   const effectiveWeight = rating?.weight != null ? rating.weight : factor.weight ?? 0;
                   const code = rating?.manager_rating_code ?? rating?.self_rating_code ?? null;
-                  const factorVal = code ? (GRADE_FACTOR[code] ?? 0) : 0;
+                  const factorVal = getFactorFromScale(code, ratingScale);
                   const rowScore = effectiveWeight * factorVal;
                   return (
                     <tr key={factor.id} style={{ transition: "background 0.13s" }} onMouseEnter={(e) => { e.currentTarget.style.background = "#f4f8ff"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
@@ -424,16 +435,10 @@ export function CoreCompetenciesSection({
                       <td style={{ ...tdStyle, minWidth: "340px" }}>
                         <div className="flex flex-col items-center gap-1">
                           {canEditSelfRatings ? (
-                            <RatingPillGroup
-                              name={`core-self-${factor.id}`}
-                              value={
-                                rating?.self_rating_code && isGrade(rating.self_rating_code)
-                                  ? rating.self_rating_code
-                                  : null
-                              }
-                              onChange={(v) =>
-                                updateRating(factor.id, "self_rating_code", v)
-                              }
+                            <RatingButtons
+                              value={rating?.self_rating_code ?? null}
+                              onChange={(code) => updateRating(factor.id, "self_rating_code", code)}
+                              disabled={false}
                             />
                           ) : (
                             <RatingGradeChip value={rating?.self_rating_code ?? null} />
@@ -466,16 +471,10 @@ export function CoreCompetenciesSection({
                       </td>
                       <td style={tdStyle}>
                         {canEditManagerRatings ? (
-                          <RatingPillGroup
-                            name={`core-mgr-${factor.id}`}
-                            value={
-                              rating?.manager_rating_code && isGrade(rating.manager_rating_code)
-                                ? rating.manager_rating_code
-                                : null
-                            }
-                            onChange={(v) =>
-                              updateRating(factor.id, "manager_rating_code", v)
-                            }
+                          <RatingButtons
+                            value={rating?.manager_rating_code ?? null}
+                            onChange={(code) => updateRating(factor.id, "manager_rating_code", code)}
+                            disabled={false}
                           />
                         ) : (
                           <RatingGradeChip value={rating?.manager_rating_code ?? null} />
@@ -525,7 +524,7 @@ export function CoreCompetenciesSection({
                     const rating = ratings.get(factor.id);
                     const effectiveWeight = rating?.weight != null ? rating.weight : factor.weight ?? 0;
                     const code = rating?.manager_rating_code ?? rating?.self_rating_code ?? null;
-                    const factorVal = code ? (GRADE_FACTOR[code] ?? 0) : 0;
+                    const factorVal = getFactorFromScale(code, ratingScale);
                     return sum + effectiveWeight * factorVal;
                   }, 0);
                   return (

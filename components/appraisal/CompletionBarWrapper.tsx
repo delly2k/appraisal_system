@@ -87,10 +87,8 @@ export function CompletionBarWrapper({
         if (res.ok) window.location.reload();
         else alert(data.error || "Failed");
       } else if (status === "MANAGER_REVIEW") {
-        const res = await fetch(`/api/appraisals/${appraisalId}/submit-manager-review`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok) window.location.reload();
-        else alert(data.error || "Failed");
+        window.dispatchEvent(new CustomEvent("appraisal-navigate-to-tab", { detail: { tabKey: "signoffs" } }));
+        return;
       } else if (status === "PENDING_SIGNOFF") {
         const role = isEmployee ? "EMPLOYEE" : isManager ? "MANAGER" : null;
         if (!role) return;
@@ -126,8 +124,8 @@ export function CompletionBarWrapper({
     }
   }, [appraisalId, status, isEmployee, isManager]);
 
-  // Hide progress bar until assessment stages (Self Assessment onward)
-  if (status === "DRAFT" || status === "PENDING_APPROVAL" || status === "COMPLETE") return null;
+  // Hide progress bar until assessment stages (In progress uses tab "Start self-assessment" button only)
+  if (status === "DRAFT" || status === "PENDING_APPROVAL" || status === "IN_PROGRESS" || status === "COMPLETE") return null;
 
   // Show progress bar for SELF_ASSESSMENT through HR_REVIEW; use empty report while loading or on error
   const displayReport: CompletionReport =

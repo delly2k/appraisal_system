@@ -27,7 +27,7 @@ export type { GenerateResult };
 
 export interface CreateCycleInput {
   name: string;
-  cycle_type: "quarterly" | "mid_year" | "annual";
+  cycle_type: "annual";
   fiscal_year: string;
   quarter?: string | null;
   start_date: string;
@@ -58,7 +58,7 @@ export async function createCycle(
     .from("appraisal_cycles")
     .insert({
       name: input.name,
-      cycle_type: input.cycle_type,
+      cycle_type: "annual",
       fiscal_year: input.fiscal_year,
       quarter: input.quarter ?? null,
       start_date: input.start_date,
@@ -70,14 +70,12 @@ export async function createCycle(
   if (e) throw new Error(e.message);
   if (!created?.id) throw new Error("Create cycle failed");
   await supabase.from("cycle_review_types").insert([
-    { cycle_id: created.id, review_type: "quarterly" },
-    { cycle_id: created.id, review_type: "mid_year" },
     { cycle_id: created.id, review_type: "annual" },
   ]);
   return { id: created.id };
 }
 
-/** Open a cycle: set status to open, then generate appraisals (mid_year + annual). */
+/** Open a cycle: set status to open, then generate appraisals (annual only). */
 export async function openCycle(cycleId: string): Promise<{
   status: string;
   appraisalsCreated: number;
@@ -174,9 +172,10 @@ export async function getDashboardDataForEmployee(
 
   const { data: appraisals } = await supabase
     .from("appraisals")
-    .select("id, review_type, quarter, status")
+    .select("id, review_type, status")
     .eq("cycle_id", cycle.id)
-    .eq("employee_id", employeeId);
+    .eq("employee_id", employeeId)
+    .eq("review_type", "annual");
 
   const appraisalIds = (appraisals ?? []).map((a) => a.id);
   const { data: workplans } = await supabase
@@ -185,29 +184,40 @@ export async function getDashboardDataForEmployee(
     .in("appraisal_id", appraisalIds.length ? appraisalIds : ["00000000-0000-0000-0000-000000000000"]);
   const workplanStatus = workplans?.[0]?.status ?? "none";
 
-  const byReview = new Map<string, { status: AppraisalStatus }>();
-  const quarterlyByQuarter = new Map<number, { status: AppraisalStatus }>();
-  for (const a of appraisals ?? []) {
-    const status = a.status as AppraisalStatus;
-    byReview.set(a.review_type, { status });
-    if (a.review_type === "quarterly" && a.quarter != null) {
-      quarterlyByQuarter.set(a.quarter, { status });
-    }
-  }
-
-  const checkins: DashboardEmployeePayload["checkins"] = {
-    Q1: (quarterlyByQuarter.get(1) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
-    Q2: (quarterlyByQuarter.get(2) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
-    Q3: (quarterlyByQuarter.get(3) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
-    Q4: (quarterlyByQuarter.get(4) as { status: AppraisalStatus } | undefined) ?? "NOT_CREATED",
-  };
+  const annualAppraisal = (appraisals ?? [])[0];
+  const annual = annualAppraisal
+    ? { status: annualAppraisal.status as AppraisalStatus }
+    : null;
 
   return {
     fiscal_year: cycle.fiscal_year,
     cycle_id: cycle.id,
     workplan_status: workplanStatus,
-    mid_year: byReview.get("mid_year") ?? null,
-    annual: byReview.get("annual") ?? null,
-    checkins,
+    annual,
   };
+}
+
+/** Derive cycle phase for display only from appraisal statuses (do not store). */
+export function deriveCyclePhase(appraisals: { status: string }[]): string {
+  if (!appraisals.length) return "Not started";
+  if (appraisals.every((a) => a.status === "COMPLETE")) return "Complete";
+  if (
+    appraisals.some((a) =>
+      ["HR_REVIEW", "HOD_REVIEW", "PENDING_SIGNOFF"].includes(a.status)
+    )
+  )
+    return "Review";
+  if (
+    appraisals.some((a) =>
+      ["MANAGER_REVIEW", "SELF_ASSESSMENT"].includes(a.status)
+    )
+  )
+    return "Assessment";
+  if (
+    appraisals.some((a) =>
+      ["WORKPLAN_SUBMITTED", "PENDING_APPROVAL"].includes(a.status)
+    )
+  )
+    return "Planning";
+  return "Not started";
 }

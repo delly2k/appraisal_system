@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyEmployee } from "@/lib/notifications";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -54,6 +55,40 @@ export async function POST(
         { error: result?.error || "Approval failed" },
         { status: 400 }
       );
+    }
+
+    // approve_workplan (DB) already set appraisal status to IN_PROGRESS
+
+    // Notify employee that workplan is approved (they can use check-ins, then start self-assessment when ready)
+    const { data: row } = await supabase
+      .from("appraisals")
+      .select("cycle_id, employee_id")
+      .eq("id", appraisalId)
+      .single();
+    if (row?.cycle_id && row?.employee_id) {
+      const { data: cycle } = await supabase
+        .from("appraisal_cycles")
+        .select("name, end_date, fiscal_year")
+        .eq("id", row.cycle_id)
+        .single();
+      const { data: emp } = await supabase
+        .from("employees")
+        .select("email, full_name")
+        .eq("employee_id", row.employee_id)
+        .single();
+      if (emp?.email && cycle) {
+        await notifyEmployee(
+          { email: emp.email, name: emp.full_name ?? undefined },
+          "self_assessment_open",
+          {
+            cycleName: cycle.name,
+            fiscalYear: cycle.fiscal_year,
+            dueDate: cycle.end_date ?? undefined,
+            employeeName: emp.full_name ?? emp.email,
+            appraisalId,
+          }
+        );
+      }
     }
 
     return NextResponse.json({

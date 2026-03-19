@@ -45,10 +45,20 @@ export async function GET(
   try {
     const user = await getCurrentUser();
     if (!user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!isHR(user)) return NextResponse.json({ error: "HR access required" }, { status: 403 });
 
     const { id: appraisalId } = await params;
     const supabase = getSupabaseAdmin();
+
+    const hrAllowed = isHR(user);
+    if (!hrAllowed) {
+      const { data: appraisal } = await supabase
+        .from("appraisals")
+        .select("manager_employee_id")
+        .eq("id", appraisalId)
+        .single();
+      const isManager = appraisal?.manager_employee_id === user.employee_id;
+      if (!isManager) return NextResponse.json({ error: "HR or manager access required" }, { status: 403 });
+    }
 
     const { data: row, error } = await supabase
       .from("appraisal_hr_recommendations")
@@ -77,7 +87,6 @@ export async function POST(
   try {
     const user = await getCurrentUser();
     if (!user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!isHR(user)) return NextResponse.json({ error: "HR access required" }, { status: 403 });
 
     const body = await req.json().catch(() => ({}));
     const recommendations = normalizeRecommendations(body?.recommendations);
@@ -88,15 +97,23 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status")
+      .select("id, status, manager_employee_id")
       .eq("id", appraisalId)
       .single();
 
     if (appErr || !appraisal) {
       return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
     }
-    if ((appraisal.status as string) !== "HR_REVIEW") {
-      return NextResponse.json({ error: "Appraisal must be in HR Review to save recommendations" }, { status: 400 });
+
+    const appStatus = (appraisal.status as string) ?? "";
+    const isManagerReviewPhase = appStatus === "MANAGER_REVIEW" || appStatus === "SUBMITTED";
+    const hrAllowed = isHR(user) && (appStatus === "HR_REVIEW" || isManagerReviewPhase);
+    const managerAllowed = appraisal.manager_employee_id === user.employee_id && isManagerReviewPhase;
+    if (!hrAllowed && !managerAllowed) {
+      return NextResponse.json(
+        { error: "Appraisal must be in HR Review (for HR) or Manager Review (for manager) to save recommendations" },
+        { status: 403 }
+      );
     }
 
     const { error: upsertErr } = await supabase

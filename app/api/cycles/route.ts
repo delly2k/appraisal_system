@@ -5,7 +5,7 @@ import { createCycle } from "@/lib/appraisal-service";
 
 const CreateCycleSchema = z.object({
   name: z.string().min(1).optional(),
-  cycle_type: z.enum(["quarterly", "mid_year", "annual"]).default("annual"),
+  cycle_type: z.enum(["annual"]).default("annual"),
   fiscal_year: z.string().min(1),
   quarter: z.string().nullable().optional(),
   start_date: z.string().min(1),

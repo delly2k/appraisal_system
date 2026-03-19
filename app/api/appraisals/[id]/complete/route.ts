@@ -58,16 +58,6 @@ export async function POST(
       return NextResponse.json({ error: transErr }, { status: 400 });
     }
 
-    const reviewType = (appraisal.review_type as string)?.toLowerCase();
-    if (reviewType === "mid_year" && appraisal.cycle_id && appraisal.employee_id) {
-      await supabase
-        .from("appraisals")
-        .update({ is_active: true })
-        .eq("cycle_id", appraisal.cycle_id)
-        .eq("employee_id", appraisal.employee_id)
-        .eq("review_type", "annual");
-    }
-
     return NextResponse.json({ success: true, status: "COMPLETE" });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

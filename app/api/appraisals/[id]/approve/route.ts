@@ -101,14 +101,14 @@ export async function POST(
       const { error: transErr } = await transitionStatus(
         supabase,
         appraisalId,
-        "SELF_ASSESSMENT",
+        "IN_PROGRESS",
         user.id,
         "Both parties approved workplan"
       );
       if (transErr) {
         return NextResponse.json({ error: transErr }, { status: 400 });
       }
-      return NextResponse.json({ success: true, status: "SELF_ASSESSMENT", bothApproved: true });
+      return NextResponse.json({ success: true, status: "IN_PROGRESS", bothApproved: true });
     }
 
     return NextResponse.json({ success: true, status: "PENDING_APPROVAL", bothApproved: false });

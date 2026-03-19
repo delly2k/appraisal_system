@@ -9,9 +9,10 @@ import type { WorkflowRole } from "@/lib/appraisal-workflow";
 const SUBMIT_LABELS: Record<AppraisalStatus, string> = {
   DRAFT: "Submit for Approval →",
   PENDING_APPROVAL: "Approve Workplan →",
+  IN_PROGRESS: "Start self-assessment →",
   SELF_ASSESSMENT: "Submit Self-Assessment →",
   SUBMITTED: "Submitted",
-  MANAGER_REVIEW: "Submit Manager Review →",
+  MANAGER_REVIEW: "Proceed to Sign-off →",
   PENDING_SIGNOFF: "Sign Off →",
   HOD_REVIEW: "HOD Sign Off →",
   HR_REVIEW: "Mark Complete →",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { WorkplanSection } from "./WorkplanSection";
@@ -13,6 +13,7 @@ import { SummaryTab } from "./SummaryTab";
 import { SignoffsTab } from "./SignoffsTab";
 import { HRActionsTab } from "./HRActionsTab";
 import { AuditTrailTab } from "./AuditTrailTab";
+import { CheckInTab } from "./checkins/CheckInTab";
 import { canEditField, type WorkflowRole } from "@/lib/appraisal-workflow";
 import type { SummaryResult } from "@/lib/summary-calc";
 import type { AppraisalStatus } from "@/types/appraisal";
@@ -28,6 +29,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+export interface AppraisalAgreement {
+  id: string;
+  status: string;
+  employee_signed_at?: string | null;
+  manager_signed_at?: string | null;
+  hr_signed_at?: string | null;
+  declined_by_email?: string | null;
+  decline_reason?: string | null;
+  declined_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  draft_pdf_path?: string | null;
+  signed_pdf_path?: string | null;
+}
+
 export interface AppraisalData {
   id: string;
   employee_id: string;
@@ -36,11 +52,17 @@ export interface AppraisalData {
   status: string;
   is_management: boolean;
   employeeName: string;
+  employeeEmail?: string | null;
+  managerName?: string;
+  managerEmail?: string | null;
+  hrOfficerName?: string;
+  hrOfficerEmail?: string | null;
   cycleName: string;
   cycleStartDate?: string;
   cycleEndDate?: string;
   approvals?: { role: string }[];
   signoffs?: { role: string; stage: string; signed_at?: string; comment?: string }[];
+  agreement?: AppraisalAgreement | null;
 }
 
 interface AppraisalTabsProps {
@@ -57,7 +79,7 @@ interface AppraisalTabsProps {
   hrRecommendationsSaved?: boolean;
 }
 
-type TabValue = "workplan" | "core" | "technical" | "productivity" | "leadership" | "summary" | "signoffs" | "hractions" | "audit";
+type TabValue = "workplan" | "checkins" | "core" | "technical" | "productivity" | "leadership" | "summary" | "signoffs" | "hractions" | "audit";
 
 const ClipboardIcon = () => (
   <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -134,6 +156,13 @@ const HistoryIcon = () => (
   <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
     <path d="M3 3v5h5" />
+  </svg>
+);
+
+const CheckInIcon = () => (
+  <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M9 11l3 3L22 4" />
+    <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
   </svg>
 );
 
@@ -316,7 +345,13 @@ export function AppraisalTabs({
   hrRecommendationsSaved = false,
 }: AppraisalTabsProps) {
   const [activeTab, setActiveTab] = useState<TabValue>("workplan");
+  const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+  const [unsavedModalOpen, setUnsavedModalOpen] = useState(false);
+  const [unsavedModalAction, setUnsavedModalAction] = useState<"tab" | "leave" | null>(null);
+  const [unsavedModalPayload, setUnsavedModalPayload] = useState<string | null>(null);
+  const [unsavedModalSaving, setUnsavedModalSaving] = useState(false);
+  const saveCurrentTabRef = useRef<(() => Promise<void>) | null>(null);
   const router = useRouter();
 
   const markDirty = useCallback((tab: string) => {
@@ -335,10 +370,13 @@ export function AppraisalTabs({
     (newTab: string) => {
       if (newTab === activeTab) return;
       if (hasAnyUnsaved) {
-        const ok = window.confirm("You have unsaved changes. Switch tabs without saving?");
-        if (!ok) return;
+        setUnsavedModalAction("tab");
+        setUnsavedModalPayload(newTab);
+        setUnsavedModalOpen(true);
+        return;
       }
       setActiveTab(newTab as TabValue);
+      if (newTab === "summary") setSummaryRefreshKey((k) => k + 1);
     },
     [activeTab, hasAnyUnsaved]
   );
@@ -346,13 +384,38 @@ export function AppraisalTabs({
   const safeNavigate = useCallback(
     (href: string) => {
       if (hasAnyUnsaved) {
-        const ok = window.confirm("You have unsaved changes. Leave without saving?");
-        if (!ok) return;
+        setUnsavedModalAction("leave");
+        setUnsavedModalPayload(href);
+        setUnsavedModalOpen(true);
+        return;
       }
       router.push(href);
     },
     [hasAnyUnsaved, router]
   );
+
+  const closeUnsavedModal = useCallback(() => {
+    setUnsavedModalOpen(false);
+    setUnsavedModalAction(null);
+    setUnsavedModalPayload(null);
+  }, []);
+
+  const handleUnsavedModalSave = useCallback(async () => {
+    setUnsavedModalSaving(true);
+    try {
+      await saveCurrentTabRef.current?.();
+      markClean(activeTab);
+      if (unsavedModalAction === "tab" && unsavedModalPayload) {
+        setActiveTab(unsavedModalPayload as TabValue);
+        if (unsavedModalPayload === "summary") setSummaryRefreshKey((k) => k + 1);
+      } else if (unsavedModalAction === "leave" && unsavedModalPayload) {
+        router.push(unsavedModalPayload);
+      }
+      closeUnsavedModal();
+    } finally {
+      setUnsavedModalSaving(false);
+    }
+  }, [activeTab, unsavedModalAction, unsavedModalPayload, router, markClean]);
   const [submitSelfAssessmentSubmitting, setSubmitSelfAssessmentSubmitting] = useState(false);
   const [selfAssessmentCanSubmit, setSelfAssessmentCanSubmit] = useState<boolean | null>(null);
   const [canSubmitForApproval, setCanSubmitForApproval] = useState<boolean | null>(null);
@@ -388,6 +451,7 @@ export function AppraisalTabs({
 
   const status = ((appraisal.status ?? "DRAFT") as string).toUpperCase() as AppraisalStatus;
   const userRole: WorkflowRole = isHR ? "HR" : isAppraisalManager ? "MANAGER" : isEmployee ? "EMPLOYEE" : "MANAGER";
+  const isInProgress = status === "IN_PROGRESS";
 
   // When employee can submit self-assessment, fetch completion to enable/disable the Submit button
   const showSelfAssessmentSubmit = status === "SELF_ASSESSMENT" && isEmployee;
@@ -487,6 +551,12 @@ export function AppraisalTabs({
     };
   }, [showManagerReviewActions, appraisal.id, showLeadership]);
 
+  useEffect(() => {
+    if (!isInProgress && activeTab === "checkins") {
+      setActiveTab("workplan");
+    }
+  }, [isInProgress, activeTab]);
+
   const canEditSelfRatings =
     (status === "SELF_ASSESSMENT" && isEmployee) ||
     canEditField("self_rating", status, userRole) ||
@@ -494,17 +564,22 @@ export function AppraisalTabs({
   const canEditManagerRatings = canEditField("manager_rating", status, userRole) || canEditField("manager_comments", status, userRole);
   const effectiveCanEditManagerRatings = canEditManagerRatings || (testBypass && status === "MANAGER_REVIEW");
 
-  const tabs: Tab[] = [
-    { id: "workplan", label: "Workplan", icon: <ClipboardIcon /> },
-    { id: "core", label: "Core Competencies", icon: <AwardIcon /> },
-    { id: "technical", label: "Technical", icon: <WrenchIcon /> },
-    { id: "productivity", label: "Productivity", icon: <TrendingUpIcon /> },
-    ...(showLeadership ? [{ id: "leadership" as const, label: "Leadership", icon: <UsersIcon /> }] : []),
-    { id: "summary", label: "Summary", icon: <FileTextIcon /> },
-    ...((status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE") ? [{ id: "signoffs" as const, label: "Sign-offs", icon: <PenLineIcon /> }] : []),
-    ...(isHR ? [{ id: "hractions" as const, label: "HR Actions", icon: <HRActionsIcon /> }] : []),
-    { id: "audit", label: "Audit trail", icon: <HistoryIcon /> },
-  ];
+  const tabs: Tab[] = isInProgress
+    ? [
+        { id: "workplan", label: "Workplan", icon: <ClipboardIcon /> },
+        { id: "checkins", label: "Check-ins", icon: <CheckInIcon /> },
+      ]
+    : [
+        { id: "workplan", label: "Workplan", icon: <ClipboardIcon /> },
+        { id: "core", label: "Core Competencies", icon: <AwardIcon /> },
+        { id: "technical", label: "Technical", icon: <WrenchIcon /> },
+        { id: "productivity", label: "Productivity", icon: <TrendingUpIcon /> },
+        ...(showLeadership ? [{ id: "leadership" as const, label: "Leadership", icon: <UsersIcon /> }] : []),
+        ...((isHR || isAppraisalManager) && ["MANAGER_REVIEW", "PENDING_SIGNOFF", "HOD_REVIEW", "HR_REVIEW", "COMPLETE"].includes(status) ? [{ id: "hractions" as const, label: "HR Actions", icon: <HRActionsIcon /> }] : []),
+        { id: "summary", label: "Summary", icon: <FileTextIcon /> },
+        ...(((status === "MANAGER_REVIEW" && (isAppraisalManager || isHR)) || status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE") ? [{ id: "signoffs" as const, label: "Sign-offs", icon: <PenLineIcon /> }] : []),
+        { id: "audit", label: "Audit trail", icon: <HistoryIcon /> },
+      ];
 
   const renderContent = () => {
     switch (activeTab) {
@@ -520,6 +595,9 @@ export function AppraisalTabs({
                 status={appraisal.status}
               />
             )}
+            {isInProgress && (
+              <p className="text-[12px] text-[#8a97b8] mb-4">Reference only — objectives are locked. Use Check-ins to track progress, then Start self-assessment when ready.</p>
+            )}
             <WorkplanSection
               appraisalId={appraisal.id}
               appraisalStatus={appraisal.status}
@@ -528,6 +606,7 @@ export function AppraisalTabs({
               isManager={isAppraisalManager}
               isHR={isHR}
               onDirtyChange={(dirty) => (dirty ? markDirty("workplan") : markClean("workplan"))}
+              registerSave={(fn) => { saveCurrentTabRef.current = fn; }}
             />
           </>
         );
@@ -539,6 +618,7 @@ export function AppraisalTabs({
             canEditManagerRatings={effectiveCanEditManagerRatings}
             canEditWeights={status === "DRAFT"}
             onDirtyChange={(dirty) => (dirty ? markDirty("core") : markClean("core"))}
+            registerSave={(fn) => { saveCurrentTabRef.current = fn; }}
           />
         );
       case "technical":
@@ -560,6 +640,7 @@ export function AppraisalTabs({
             canEditManagerRatings={effectiveCanEditManagerRatings}
             canEditWeights={status === "DRAFT"}
             onDirtyChange={(dirty) => (dirty ? markDirty("productivity") : markClean("productivity"))}
+            registerSave={(fn) => { saveCurrentTabRef.current = fn; }}
           />
         );
       case "leadership":
@@ -570,6 +651,7 @@ export function AppraisalTabs({
             canEditManagerRatings={effectiveCanEditManagerRatings}
             canEditWeights={status === "DRAFT"}
             onDirtyChange={(dirty) => (dirty ? markDirty("leadership") : markClean("leadership"))}
+            registerSave={(fn) => { saveCurrentTabRef.current = fn; }}
           />
         ) : null;
       case "summary":
@@ -583,6 +665,7 @@ export function AppraisalTabs({
             isEmployee={isEmployee}
             currentUserEmployeeId={currentUserEmployeeId}
             onSummaryResult={handleSummaryResult}
+            refreshKey={summaryRefreshKey}
           />
         );
       case "signoffs":
@@ -594,6 +677,8 @@ export function AppraisalTabs({
             isEmployee={isEmployee}
             isAppraisalManager={isAppraisalManager}
             isHOD={isHOD}
+            isHR={isHR}
+            showLeadership={showLeadership}
           />
         );
       case "hractions":
@@ -602,10 +687,21 @@ export function AppraisalTabs({
             appraisalId={appraisal.id}
             status={status}
             isHR={isHR}
+            isManager={isAppraisalManager}
           />
         );
       case "audit":
         return <AuditTrailTab appraisalId={appraisal.id} />;
+      case "checkins":
+        return (
+          <CheckInTab
+            appraisalId={appraisal.id}
+            isManager={isAppraisalManager}
+            isHR={isHR}
+            isEmployee={isEmployee}
+            testBypass={testBypass}
+          />
+        );
       default:
         return null;
     }
@@ -615,17 +711,19 @@ export function AppraisalTabs({
   const isPendingSignoff = status === "PENDING_SIGNOFF";
   const approvedEmployee = approvals.some((a) => a.role === "EMPLOYEE");
   const approvedManager = approvals.some((a) => a.role === "MANAGER");
-  const signedEmployee = signoffs.some((s) => s.role === "EMPLOYEE");
-  const signedManager = signoffs.some((s) => s.role === "MANAGER");
+  const agreement = appraisal.agreement as { status?: string; employee_signed_at?: string | null; manager_signed_at?: string | null; hr_signed_at?: string | null } | undefined | null;
+  const signedEmployee = !!agreement?.employee_signed_at;
+  const signedManager = !!agreement?.manager_signed_at;
+  const signedHR = !!agreement?.hr_signed_at;
   const signedHOD = signoffs.some((s) => s.role === "HOD" && s.stage === "HOD_REVIEW");
-  const allSignoffsComplete = signedManager && signedEmployee && signedHOD;
+  const allSignoffsComplete = agreement?.status === "SIGNED" ? signedHOD : false;
   const managerSignoff = signoffs.find((s) => s.role === "MANAGER");
   const employeeSignoff = signoffs.find((s) => s.role === "EMPLOYEE");
-  const canManagerSign = status === "PENDING_SIGNOFF" && isAppraisalManager && !signedManager;
-  const canEmployeeSign = status === "PENDING_SIGNOFF" && isEmployee && !signedEmployee;
+  const canManagerSign = false;
+  const canEmployeeSign = false;
   const currentUserRoleForApproval: "EMPLOYEE" | "MANAGER" | null = isEmployee ? "EMPLOYEE" : isAppraisalManager ? "MANAGER" : null;
   const currentUserHasNotApproved = currentUserRoleForApproval && !approvals.some((a) => a.role === currentUserRoleForApproval);
-  const currentUserHasNotSigned = currentUserRoleForApproval && !signoffs.some((s) => s.role === currentUserRoleForApproval);
+  const currentUserHasNotSigned = false;
 
   return (
     <div>
@@ -682,6 +780,28 @@ export function AppraisalTabs({
           } : undefined}
         />
       )}
+
+      {/* Unsaved changes confirmation — modal with full-page overlay (replaces browser confirm) */}
+      <Dialog open={unsavedModalOpen} onOpenChange={(open) => { if (!open) closeUnsavedModal(); }}>
+        <DialogContent className="sm:max-w-[425px]" showClose={false}>
+          <DialogHeader>
+            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogDescription>
+              {unsavedModalAction === "tab"
+                ? "You have unsaved changes. Switch tabs without saving?"
+                : "You have unsaved changes. Leave without saving?"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeUnsavedModal} disabled={unsavedModalSaving}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleUnsavedModalSave()} disabled={unsavedModalSaving}>
+              {unsavedModalSaving ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Request Changes modal (replaces browser prompt) */}
       <Dialog open={requestChangesModalOpen} onOpenChange={(open) => { if (!open) { setRequestChangesModalOpen(false); setRequestChangesReason(""); } }}>
@@ -780,57 +900,37 @@ export function AppraisalTabs({
         </div>
       )}
 
-      {/* Sign-off panel (PENDING_SIGNOFF) */}
-      {isPendingSignoff && (
-        <ApprovalSignoffPanel
-          variant="signoff"
-          appraisalId={appraisal.id}
-          statusLabel="Awaiting Sign-off"
-          subLabel={`${signedEmployee ? "Employee ✓" : "Employee ○"} · ${signedManager ? "Manager ✓" : "Manager ○"} — both must sign to proceed`}
-          badges={[
-            { label: "Employee", done: signedEmployee },
-            { label: "Manager", done: signedManager },
-          ]}
-          actionButtonLabel="Sign Off"
-          showActionButton={!testBypass && !!currentUserHasNotSigned}
-          onAction={async () => {
-            if (!currentUserRoleForApproval) return;
-            const res = await fetch(`/api/appraisals/${appraisal.id}/signoff`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ role: currentUserRoleForApproval, stage: "PENDING_SIGNOFF" }),
-            });
-            const data = await res.json();
-            if (res.ok) window.location.reload();
-            else alert(data.error || "Failed to sign off");
-          }}
-          bypassMode={testBypass}
-          primaryActionLabel={testBypass ? "Sign off as Employee" : undefined}
-          primaryActionEnabled={testBypass ? !signedEmployee : undefined}
-          onPrimaryAction={testBypass ? async () => {
-            const res = await fetch(`/api/appraisals/${appraisal.id}/signoff`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ role: "EMPLOYEE", stage: "PENDING_SIGNOFF" }),
-            });
-            const data = await res.json();
-            if (res.ok) window.location.reload();
-            else alert(data.error || "Failed to sign off");
-          } : undefined}
-          secondaryActionLabel={testBypass ? "Sign off as Manager" : undefined}
-          secondaryActionEnabled={testBypass ? !!signedEmployee && !signedManager : undefined}
-          onSecondaryAction={testBypass ? async () => {
-            const res = await fetch(`/api/appraisals/${appraisal.id}/signoff`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ role: "MANAGER", stage: "PENDING_SIGNOFF" }),
-            });
-            const data = await res.json();
-            if (res.ok) window.location.reload();
-            else alert(data.error || "Failed to sign off");
-          } : undefined}
-        />
+      {/* Adobe Sign strip (PENDING_SIGNOFF): three signers + status */}
+      {isPendingSignoff && agreement && agreement.status !== "SIGNED" && (
+        <div
+          className="flex items-center gap-3 px-5 py-3 bg-[#fffbeb] border border-[#fcd34d] rounded-[10px] mb-4"
+        >
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" style={{ color: "#d97706" }} aria-hidden>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-6h-2v6zm0-8h2V7h-2v2z" />
+          </svg>
+          <p className="text-[12px] font-semibold text-[#92400e]">Sign-off sent via Adobe Sign</p>
+          <p className="text-[11px] text-[#d97706]">· Check the Sign-offs tab for status</p>
+          <div className="flex items-center gap-1.5 ml-auto">
+            {[signedEmployee, signedManager, signedHR].map((signed, i) => (
+              <div key={i} className="flex items-center gap-1.5" title={["Employee", "Manager", "HR"][i] + (signed ? " — signed" : " — pending")}>
+                <span className={`w-2 h-2 rounded-full ${signed ? "bg-[#059669]" : "bg-[#dde5f5]"}`} aria-hidden />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
+      {(status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE") &&
+        agreement?.status === "SIGNED" && (
+          <div
+            className="flex items-center gap-3 px-5 py-3 bg-[#ecfdf5] border border-[#6ee7b7] rounded-[10px]"
+            style={{ marginBottom: 12 }}
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span className="text-[12px] font-semibold text-[#065f46]">Sign-off complete · All signatures collected</span>
+          </div>
+        )}
 
       {/* Tab bar — full width, aligned with stepper */}
       <div className="w-full flex items-center gap-0.5 mb-6 overflow-x-auto overflow-y-hidden bg-white border-b border-[#dde5f5]">
@@ -954,6 +1054,42 @@ export function AppraisalTabs({
         </div>
       )}
 
+      {/* Start self-assessment — visible when in IN_PROGRESS (employee only) */}
+      {isInProgress && isEmployee && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", marginBottom: "16px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const res = await fetch(`/api/appraisals/${appraisal.id}/start-self-assessment`, { method: "POST" });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Failed");
+                window.location.reload();
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "Failed to start self-assessment");
+              }
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              padding: "9px 20px",
+              borderRadius: "8px",
+              background: "linear-gradient(135deg, #059669, #047857)",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "white",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(5,150,105,0.35)",
+              transition: "all 0.16s",
+            }}
+          >
+            <SendIcon /> Start self-assessment
+          </button>
+        </div>
+      )}
+
       {/* Submit Self-Assessment — below tabs, visible on all tabs when in SELF_ASSESSMENT */}
       {status === "SELF_ASSESSMENT" && isEmployee && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", marginBottom: "16px", flexWrap: "wrap" }}>
@@ -992,7 +1128,7 @@ export function AppraisalTabs({
         </div>
       )}
 
-      {/* Recall Submission + Submit Manager Review — below tabs, visible on all tabs when in MANAGER_REVIEW */}
+      {/* Recall Submission + Proceed to Sign-off (or portal slot for Generate PDF when on Sign-offs tab) */}
       {status === "MANAGER_REVIEW" && (isEmployee || isAppraisalManager || testBypass) && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", marginBottom: "16px", flexWrap: "wrap" }}>
           {(status === "MANAGER_REVIEW" || status === "SUBMITTED") && isEmployee && (
@@ -1011,31 +1147,25 @@ export function AppraisalTabs({
             </button>
           )}
           {status === "MANAGER_REVIEW" && (isAppraisalManager || testBypass) && (
-            <button
-              type="button"
-              onClick={async () => {
-                setManagerReviewSubmitting(true);
-                try {
-                  const res = await fetch(`/api/appraisals/${appraisal.id}/submit-manager-review`, { method: "POST" });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.error || "Failed");
-                  window.location.reload();
-                } catch {
-                  setManagerReviewSubmitting(false);
-                }
-              }}
-              disabled={managerReviewSubmitting || managerReviewCanSubmit !== true}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: "7px",
-                padding: "9px 20px", borderRadius: "8px",
-                background: !managerReviewSubmitting && managerReviewCanSubmit === true ? "linear-gradient(135deg, #059669, #047857)" : "#e2e8f0",
-                border: "none", fontSize: "13px", fontWeight: 600,
-                color: !managerReviewSubmitting && managerReviewCanSubmit === true ? "white" : "#94a3b8",
-                cursor: !managerReviewSubmitting && managerReviewCanSubmit === true ? "pointer" : "not-allowed",
-              }}
-            >
-              <SendIcon /> {managerReviewSubmitting ? "Submitting…" : "Submit Manager Review"}
-            </button>
+            activeTab === "signoffs" ? (
+              <div id="manager-review-actions" style={{ display: "inline-flex", alignItems: "center" }} />
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleTabChange("signoffs")}
+                disabled={managerReviewCanSubmit !== true}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "7px",
+                  padding: "9px 20px", borderRadius: "8px",
+                  background: managerReviewCanSubmit === true ? "linear-gradient(135deg, #059669, #047857)" : "#e2e8f0",
+                  border: "none", fontSize: "13px", fontWeight: 600,
+                  color: managerReviewCanSubmit === true ? "white" : "#94a3b8",
+                  cursor: managerReviewCanSubmit === true ? "pointer" : "not-allowed",
+                }}
+              >
+                <SendIcon /> Proceed to Sign-off →
+              </button>
+            )
           )}
         </div>
       )}

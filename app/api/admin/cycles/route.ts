@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const fiscal_year = typeof body.fiscal_year === "string" ? body.fiscal_year.trim() : "";
     const name = fiscal_year ? `FY ${fiscal_year}` : body.name;
-    const cycle_type = body.cycle_type ?? "annual";
+    const cycle_type = "annual";
     const quarter = body.quarter?.trim() || null;
     const start_date = body.start_date?.trim() || null;
     const end_date = body.end_date?.trim() || null;
@@ -120,8 +120,6 @@ export async function POST(request: NextRequest) {
 
     if (created?.id) {
       await supabase.from("cycle_review_types").insert([
-        { cycle_id: created.id, review_type: "quarterly" },
-        { cycle_id: created.id, review_type: "mid_year" },
         { cycle_id: created.id, review_type: "annual" },
       ]);
 

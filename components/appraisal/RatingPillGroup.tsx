@@ -46,11 +46,14 @@ export const gradeChipStyles: Record<Grade, string> = {
 
 const VALID_GRADES: Grade[] = ["A", "B", "C", "D", "E"];
 
-export function isGrade(value: string | null): value is Grade {
-  return value != null && VALID_GRADES.includes(value as Grade);
-}
+/** 1-10 numeric rating codes (replaces A-E). */
+export type RatingCode = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10";
 
-const GRADE_ORDER: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, E: 1 };
+const VALID_RATING_CODES: RatingCode[] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
+export function isGrade(value: string | null): value is RatingCode {
+  return value != null && VALID_RATING_CODES.includes(value as RatingCode);
+}
 
 export function VarianceChip({
   selfRating,
@@ -61,8 +64,11 @@ export function VarianceChip({
 }) {
   if (!selfRating || !managerRating) return null;
 
-  const delta = GRADE_ORDER[managerRating] - GRADE_ORDER[selfRating];
+  const selfNum = parseInt(selfRating, 10);
+  const managerNum = parseInt(managerRating, 10);
+  if (Number.isNaN(selfNum) || Number.isNaN(managerNum)) return null;
 
+  const delta = managerNum - selfNum;
   if (delta === 0) return null;
 
   const isUp = delta > 0;
@@ -146,13 +152,26 @@ export function RatingPillGroup({
   );
 }
 
+const RATING_BAND_COLOR: Record<number, string> = {
+  1: "bg-red-50 text-red-600",
+  2: "bg-red-50 text-red-600",
+  3: "bg-orange-50 text-orange-700",
+  4: "bg-orange-50 text-orange-700",
+  5: "bg-amber-50 text-amber-600",
+  6: "bg-amber-50 text-amber-600",
+  7: "bg-emerald-50 text-emerald-600",
+  8: "bg-emerald-50 text-emerald-600",
+  9: "bg-emerald-50 text-emerald-700",
+  10: "bg-emerald-50 text-emerald-700",
+};
+
 interface RatingGradeChipProps {
-  value: Grade | string | null;
+  value: Grade | RatingCode | string | null;
   className?: string;
 }
 
 export function RatingGradeChip({ value, className }: RatingGradeChipProps) {
-  if (value == null || !isGrade(value)) {
+  if (value == null) {
     return (
       <span
         className={cn(
@@ -164,44 +183,51 @@ export function RatingGradeChip({ value, className }: RatingGradeChipProps) {
       </span>
     );
   }
+  if (isGrade(value)) {
+    const n = parseInt(value, 10);
+    const bandClass = !Number.isNaN(n) && n >= 1 && n <= 10 ? RATING_BAND_COLOR[n] : "bg-[#eff6ff] text-[#1d4ed8]";
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center justify-center w-7 h-7 rounded-[6px] font-['Sora',sans-serif] text-[13px] font-bold",
+          bandClass,
+          className
+        )}
+      >
+        {value}
+      </span>
+    );
+  }
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center w-7 h-7 rounded-[6px] font-['Sora',sans-serif] text-[13px] font-bold",
-        gradeChipStyles[value],
+        "inline-flex items-center justify-center w-7 h-7 rounded-[6px] border-[1.5px] border-dashed border-[#dde5f5] text-[#8a97b8] text-base",
         className
       )}
     >
-      {value}
+      —
     </span>
   );
 }
 
 export function RatingLegend() {
   const items = [
-    { grade: "A", color: "#059669", label: "Highly Exceeds (95–100%)" },
-    { grade: "B", color: "#2563eb", label: "Exceeds (90–95%)" },
-    { grade: "C", color: "#0284c7", label: "Meets (80–90%)" },
-    { grade: "D", color: "#d97706", label: "Below (70–79%)" },
-    { grade: "E", color: "#dc2626", label: "Far Below (<70%)" },
+    { range: "1–2", label: "Far below", color: "#dc2626" },
+    { range: "3–4", label: "Below", color: "#9a3412" },
+    { range: "5–6", label: "Meets", color: "#92400e" },
+    { range: "7–8", label: "Exceeds", color: "#166534" },
+    { range: "9–10", label: "Highly exceeds", color: "#065f46" },
   ];
   return (
     <div
-      className="flex gap-4 flex-wrap px-4 py-2.5 bg-[#f8faff] border-t border-[#dde5f5]"
+      className="flex flex-wrap items-center gap-4 border-t border-[#dde5f5] bg-[#f8faff] px-5 py-2.5"
       style={{ fontFamily: "DM Sans, sans-serif" }}
     >
-      {items.map(({ grade, color, label }) => (
-        <div
-          key={grade}
-          className="flex items-center gap-1.5 text-[11px] text-[#4a5a82]"
-        >
-          <span
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ background: color }}
-          />
-          <span>
-            <strong>{grade}</strong> — {label}
-          </span>
+      {items.map((b) => (
+        <div key={b.range} className="flex items-center gap-1.5 text-[10px]" style={{ color: "#8a97b8" }}>
+          <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: b.color }} />
+          <span style={{ color: b.color, fontWeight: 500 }}>{b.range}</span>
+          <span>— {b.label}</span>
         </div>
       ))}
     </div>

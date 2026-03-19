@@ -7,6 +7,7 @@ export interface HRActionsTabProps {
   appraisalId: string;
   status: string;
   isHR: boolean;
+  isManager?: boolean;
 }
 
 const REC_KEYS_LEFT: { key: string; label: string }[] = [
@@ -49,17 +50,19 @@ function normalizeRec(o: unknown): Record<string, boolean> {
   return out;
 }
 
-export function HRActionsTab({ appraisalId, status, isHR }: HRActionsTabProps) {
+export function HRActionsTab({ appraisalId, status, isHR, isManager = false }: HRActionsTabProps) {
   const [recs, setRecs] = useState<Record<string, boolean>>({ ...DEFAULT_REC });
   const [otherNotes, setOtherNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const currentUserRole = isHR ? "HR" : "";
-  const isHRReview = status === "HR_REVIEW";
+  const isManagerReviewPhase = status === "MANAGER_REVIEW" || status === "SUBMITTED";
+  const canViewAndEdit =
+    (status === "HR_REVIEW" && isHR) || (isManagerReviewPhase && (isManager || isHR));
 
   useEffect(() => {
-    if (!appraisalId || !isHR) {
+    if (!appraisalId || (!isHR && !isManager)) {
       setLoading(false);
       return;
     }
@@ -79,18 +82,18 @@ export function HRActionsTab({ appraisalId, status, isHR }: HRActionsTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [appraisalId, isHR]);
+  }, [appraisalId, isHR, isManager]);
 
-  if (status !== "HR_REVIEW" || currentUserRole !== "HR") {
+  if (!canViewAndEdit) {
     return (
       <div className="flex items-center justify-center py-20 text-[#8a97b8] text-sm">
-        HR recommendations are only available during HR Review phase.
+        HR recommendations are available during Manager Review or HR Review phase.
       </div>
     );
   }
 
   const handleSave = async () => {
-    if (!isHRReview) return;
+    if (!canViewAndEdit) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/appraisals/${appraisalId}/hr-recommendations`, {
@@ -100,7 +103,10 @@ export function HRActionsTab({ appraisalId, status, isHR }: HRActionsTabProps) {
       });
       const data = await res.json();
       if (!res.ok) alert(data.error || "Failed to save");
-      else window.location.reload();
+      else {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 4000);
+      }
     } finally {
       setSaving(false);
     }
@@ -114,19 +120,71 @@ export function HRActionsTab({ appraisalId, status, isHR }: HRActionsTabProps) {
     );
   }
 
+  const SaveIcon = () => (
+    <svg style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
+    </svg>
+  );
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="border border-[#dde5f5] rounded-[14px] overflow-hidden">
-        <div className="flex items-center gap-2.5 px-5 py-3.5 bg-[#f8faff] border-b border-[#dde5f5]">
-          <div className="w-8 h-8 rounded-[8px] bg-[#ccfbf1] border border-[#99f6e4] flex items-center justify-center">
-            <ClipboardCheck className="w-4 h-4 text-[#0d9488]" />
-          </div>
+      {saveSuccess && (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "14px 16px", borderRadius: "10px", background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
           <div>
-            <p className="font-['Sora'] text-[13px] font-bold">Section B — HR Recommendations</p>
-            <p className="text-[11px] text-[#8a97b8]">For HR use only</p>
+            <div style={{ fontWeight: 600, fontSize: "13px", color: "#166534" }}>Success</div>
+            <div style={{ fontSize: "13px", color: "#15803d" }}>HR recommendations saved successfully.</div>
           </div>
         </div>
-        <div className="p-5 flex flex-col gap-4">
+      )}
+      <div
+        style={{
+          background: "white",
+          borderRadius: "14px",
+          border: "1px solid #dde5f5",
+          boxShadow: "0 2px 12px rgba(15,31,61,0.07), 0 0 1px rgba(15,31,61,0.1)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #dde5f5", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "32px", height: "32px", borderRadius: "9px", background: "#ccfbf1", display: "flex", alignItems: "center", justifyContent: "center", color: "#0d9488" }}>
+              <ClipboardCheck className="w-4 h-4" />
+            </div>
+            <div>
+              <div style={{ fontFamily: "Sora, sans-serif", fontSize: "15px", fontWeight: 600, color: "#0f1f3d", letterSpacing: "-0.01em" }}>
+                HR Recommendations
+              </div>
+              <div style={{ fontSize: "12px", color: "#8a97b8", marginTop: "1px" }}>
+                For HR and manager use during Manager Review or HR Review.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canViewAndEdit || saving}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              padding: "9px 20px",
+              borderRadius: "8px",
+              background: !saving && canViewAndEdit ? "linear-gradient(135deg, #0d9488, #047857)" : "#e2e8f0",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: !saving && canViewAndEdit ? "white" : "#94a3b8",
+              cursor: !saving && canViewAndEdit ? "pointer" : "not-allowed",
+              boxShadow: !saving && canViewAndEdit ? "0 2px 8px rgba(13,148,136,0.35)" : "none",
+              transition: "all 0.16s",
+            }}
+          >
+            <SaveIcon /> {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        <div style={{ padding: "20px 24px 24px" }}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0">
             <div className="flex flex-col">
               {REC_KEYS_LEFT.map(({ key, label }) => (
@@ -166,15 +224,8 @@ export function HRActionsTab({ appraisalId, status, isHR }: HRActionsTabProps) {
             onChange={(e) => setOtherNotes(e.target.value)}
             placeholder="Additional notes or recommendations..."
             className="w-full border border-[#dde5f5] rounded-[8px] p-3 text-[13px] text-[#0f1f3d] resize-none min-h-[80px] focus:outline-none focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/10"
+            style={{ marginTop: "16px" }}
           />
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!isHRReview || saving}
-            className="self-end px-5 py-2 rounded-[8px] bg-[#0d9488] text-white text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
         </div>
       </div>
     </div>

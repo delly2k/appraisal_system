@@ -155,6 +155,13 @@ const navItems: NavItem[] = [
     permission: "admin:view",
     section: "hr",
   },
+  {
+    href: "/admin/users",
+    label: "User administration",
+    icon: <UsersIcon />,
+    permission: "admin:view",
+    section: "hr",
+  },
 ];
 
 export function Sidebar() {
@@ -339,16 +346,23 @@ export function Sidebar() {
                   item.href === "/admin/operational-plan" && pathname.startsWith("/admin/operational-plan");
                 const is360Active =
                   item.href === "/admin/360" && pathname.startsWith("/admin/360");
-                const isAdminButOn360 = item.href === "/admin" && pathname.startsWith("/admin/360");
-                const isActive = isHRAdminActive
-                  ? true
-                  : isOperationalPlanActive
-                    ? true
-                    : is360Active
+                const isUsersActive =
+                  item.href === "/admin/users" && pathname.startsWith("/admin/users");
+                const isAppraisalsActive =
+                  item.href === "/admin/appraisals" && pathname.startsWith("/admin/appraisals");
+                // HR Administration (href="/admin") must only be active for /admin or its settings routes, not for /admin/appraisals, /admin/360, etc.
+                const isActive =
+                  item.href === "/admin"
+                    ? isHRAdminActive
+                    : isOperationalPlanActive
                       ? true
-                      : isAdminButOn360
-                        ? false
-                        : pathname === item.href || pathname.startsWith(item.href + "/");
+                      : is360Active
+                        ? true
+                        : isUsersActive
+                          ? true
+                          : isAppraisalsActive
+                            ? true
+                            : pathname === item.href || pathname.startsWith(item.href + "/");
 
                 return (
                   <Link

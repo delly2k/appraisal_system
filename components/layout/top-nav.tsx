@@ -83,6 +83,7 @@ const pathLabels: Record<string, string> = {
   "/admin/appraisals": "All Appraisals",
   "/admin": "HR Administration",
   "/admin/360": "All 360 Reviews",
+  "/admin/users": "User administration",
 };
 
 function getBreadcrumb(pathname: string): { parent: string | null; current: string } {

@@ -59,7 +59,14 @@ function AppraisalTable({ rows }: AppraisalTableProps) {
         border: "1px solid var(--border-color)",
       }}
     >
-      <table className="w-full">
+      <table className="w-full table-fixed">
+        <colgroup>
+          <col style={{ width: "28%" }} />
+          <col style={{ width: "18%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "22%" }} />
+          <col style={{ width: "18%" }} />
+        </colgroup>
         <thead style={{ backgroundColor: "var(--surface)" }}>
           <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
             <th className="px-5 py-3 text-left text-[10.5px] font-bold uppercase tracking-wider text-text-muted">

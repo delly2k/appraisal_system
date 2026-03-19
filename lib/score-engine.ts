@@ -49,6 +49,7 @@ export async function calculateAppraisalScore(
     throw new Error(appraisalError?.message ?? "Appraisal not found");
   }
 
+  // 1-10 numeric scale: code '1'–'10', factor 0.1–1.0. Score = weight × factor.
   const { data: ratingScale } = await supabase
     .from("rating_scale")
     .select("code, factor");

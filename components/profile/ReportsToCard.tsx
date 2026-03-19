@@ -42,12 +42,12 @@ export function ReportsToCard({
   cycleAppraisals,
   activeCycleName,
 }: ReportsToCardProps) {
-  const midYearAppraisal = cycleAppraisals.find(
-    (a) => a.review_type.toLowerCase() === "mid_year"
-  );
   const annualAppraisal = cycleAppraisals.find(
-    (a) => a.review_type.toLowerCase() === "annual"
+    (a) => a.review_type?.toLowerCase() === "annual"
   );
+  const midYearAppraisal: CycleAppraisal | null = cycleAppraisals.find(
+    (a) => a.review_type?.toLowerCase() === "mid_year"
+  ) ?? null;
 
   return (
     <div

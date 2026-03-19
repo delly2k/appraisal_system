@@ -1,6 +1,7 @@
 /**
  * Appraisal status state machine.
  * Disallows skipped or reverse transitions; only the next step is allowed.
+ * Phase progression is process-driven: workplan approval automatically moves to self_assessment (no HR gate).
  */
 
 /** Phases used by this state machine (legacy workflow). */

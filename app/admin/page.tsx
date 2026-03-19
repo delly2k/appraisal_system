@@ -9,7 +9,7 @@ const CogIcon = () => (
 
 export default function AdminPage() {
   return (
-    <div style={{ animation: "fadeUp 0.4s ease both" }}>
+    <div className="max-w-7xl mx-auto py-6 px-4" style={{ animation: "fadeUp 0.4s ease both" }}>
       {/* Page Header */}
       <div style={{ marginBottom: "28px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "4px" }}>

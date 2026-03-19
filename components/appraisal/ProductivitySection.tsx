@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { RatingButtons } from "./RatingButtons";
 import {
-  RatingPillGroup,
   RatingGradeChip,
   RatingLegend,
-  isGrade,
   VarianceChip,
 } from "./RatingPillGroup";
 
@@ -42,6 +41,8 @@ interface ProductivitySectionProps {
   canEditWeights?: boolean;
   /** Optional: notify parent when dirty state changes (for tab navigation guard). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Optional: register save function for parent (e.g. unsaved-changes modal Save). */
+  registerSave?: (save: (() => Promise<void>) | null) => void;
 }
 
 const SaveIcon = () => (
@@ -109,6 +110,7 @@ export function ProductivitySection({
   canEditManagerRatings,
   canEditWeights = false,
   onDirtyChange,
+  registerSave,
 }: ProductivitySectionProps) {
   const [isDirty, setIsDirty] = useState(false);
   useUnsavedChanges(isDirty);
@@ -246,6 +248,12 @@ export function ProductivitySection({
       setSaving(false);
     }
   }, [appraisalId, ratings, factors]);
+
+  useEffect(() => {
+    if (!registerSave) return;
+    registerSave(saveRatings);
+    return () => registerSave(null);
+  }, [registerSave, saveRatings]);
 
   const canEdit = canEditSelfRatings || canEditManagerRatings || canEditWeights;
   const totalWeight = factors.reduce(
@@ -442,16 +450,10 @@ export function ProductivitySection({
                       <td style={{ ...tdStyle, minWidth: "340px" }}>
                         <div className="flex flex-col items-center gap-1">
                           {canEditSelfRatings ? (
-                            <RatingPillGroup
-                              name={`prod-self-${factor.id}`}
-                              value={
-                                rating?.self_rating_code && isGrade(rating.self_rating_code)
-                                  ? rating.self_rating_code
-                                  : null
-                              }
-                              onChange={(v) =>
-                                updateRating(factor.id, "self_rating_code", v)
-                              }
+                            <RatingButtons
+                              value={rating?.self_rating_code ?? null}
+                              onChange={(code) => updateRating(factor.id, "self_rating_code", code)}
+                              disabled={false}
                             />
                           ) : (
                             <RatingGradeChip value={rating?.self_rating_code ?? null} />
@@ -484,16 +486,10 @@ export function ProductivitySection({
                       </td>
                       <td style={tdStyle}>
                         {canEditManagerRatings ? (
-                          <RatingPillGroup
-                            name={`prod-mgr-${factor.id}`}
-                            value={
-                              rating?.manager_rating_code && isGrade(rating.manager_rating_code)
-                                ? rating.manager_rating_code
-                                : null
-                            }
-                            onChange={(v) =>
-                              updateRating(factor.id, "manager_rating_code", v)
-                            }
+                          <RatingButtons
+                            value={rating?.manager_rating_code ?? null}
+                            onChange={(code) => updateRating(factor.id, "manager_rating_code", code)}
+                            disabled={false}
                           />
                         ) : (
                           <RatingGradeChip value={rating?.manager_rating_code ?? null} />

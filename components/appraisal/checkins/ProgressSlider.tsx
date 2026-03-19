@@ -1,0 +1,36 @@
+"use client";
+
+interface ProgressSliderProps {
+  value: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+}
+
+export function ProgressSlider({ value, onChange, disabled }: ProgressSliderProps) {
+  const n = Math.min(100, Math.max(0, Number(value) || 0));
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 relative h-2 rounded-full bg-[#f8faff] border border-[#dde5f5] overflow-hidden">
+        <div
+          className="h-full rounded-full transition-[width]"
+          style={{ width: `${n}%`, background: "#0d9488" }}
+        />
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={n}
+          onChange={(e) => onChange(Number(e.target.value))}
+          disabled={disabled}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+        />
+      </div>
+      <span
+        className="text-[11px] font-semibold text-[#0f1f3d] w-8 text-right flex-shrink-0"
+        style={{ fontFamily: "Sora, sans-serif" }}
+      >
+        {n}%
+      </span>
+    </div>
+  );
+}

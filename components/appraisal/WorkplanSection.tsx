@@ -6,6 +6,15 @@ import { createPortal } from "react-dom";
 import { calcMetricPercentage, calcMgrResult, getDateVariance, type MetricType, type WorkplanMetricItem } from "@/lib/metric-calc";
 import { cn } from "@/utils/cn";
 import { MetricTypePicker } from "@/components/appraisal/MetricTypePicker";
+import { EvidenceBadge } from "@/components/appraisal/workplan/EvidenceBadge";
+import { EvidenceModal } from "@/components/appraisal/workplan/EvidenceModal";
+import { WorkplanUploadModal } from "@/components/appraisal/workplan/WorkplanUploadModal";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { createClient } from "@/lib/supabase";
 import { Search, ChevronRight, Building2, Layers, Briefcase } from "lucide-react";
 
 export interface PickerObjective {
@@ -41,6 +50,8 @@ interface WorkplanData {
   locked_at: string | null;
   submitted_at: string | null;
   rejection_reason: string | null;
+  imported_from_file?: string | null;
+  imported_sheet?: string | null;
 }
 
 const BLANK_ROW = (workplan_id: string): Omit<WorkplanItemRow, "id"> => ({
@@ -106,6 +117,8 @@ interface WorkplanSectionProps {
   isHR: boolean;
   /** Optional: notify parent when dirty state changes (for tab navigation guard). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Optional: register save function for parent (e.g. unsaved-changes modal Save). */
+  registerSave?: (save: (() => Promise<void>) | null) => void;
 }
 
 const PlusIcon = () => (
@@ -385,6 +398,7 @@ export function WorkplanSection({
   isManager,
   isHR,
   onDirtyChange,
+  registerSave,
 }: WorkplanSectionProps) {
   const [isDirty, setIsDirty] = useState(false);
   useUnsavedChanges(isDirty);
@@ -407,6 +421,9 @@ export function WorkplanSection({
   const [objectives, setObjectives] = useState<PickerObjective[]>([]);
   const [dismissedWeightAlert, setDismissedWeightAlert] = useState(false);
   const [dismissedRequiredFieldAlert, setDismissedRequiredFieldAlert] = useState(false);
+  const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({});
+  const [activeEvidenceItem, setActiveEvidenceItem] = useState<WorkplanItemRow | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedObjective((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -433,6 +450,7 @@ export function WorkplanSection({
 
   // Show actual results from SELF_ASSESSMENT onward
   const showActualResults = ["SELF_ASSESSMENT", "SUBMITTED", "MANAGER_REVIEW", "PENDING_SIGNOFF", "HOD_REVIEW", "HR_REVIEW", "COMPLETE"].includes(status);
+  const showTargetColumn = canEditPlanningFields || showActualResults || status === "IN_PROGRESS";
 
   const isPlanningPhase = status === "DRAFT" || status === "PENDING_APPROVAL";
   const canSubmitSelfAssessment = status === "SELF_ASSESSMENT" && isEmployee;
@@ -460,6 +478,8 @@ export function WorkplanSection({
         locked_at: data.workplan.locked_at,
         submitted_at: data.workplan.submitted_at,
         rejection_reason: data.workplan.rejection_reason,
+        imported_from_file: data.workplan.imported_from_file ?? null,
+        imported_sheet: data.workplan.imported_sheet ?? null,
       });
 
       const mapped: WorkplanItemRow[] = (data.items ?? []).map((r: Record<string, unknown>) => {
@@ -519,6 +539,26 @@ export function WorkplanSection({
   useEffect(() => {
     loadWorkplan();
   }, [loadWorkplan]);
+
+  const fetchEvidenceCounts = useCallback(async () => {
+    if (!appraisalId || items.length === 0) return;
+    const supabase = createClient();
+    const ids = items.map((i) => i.id);
+    const { data } = await supabase
+      .from("workplan_item_evidence")
+      .select("workplan_item_id")
+      .eq("appraisal_id", appraisalId)
+      .in("workplan_item_id", ids);
+    const counts: Record<string, number> = {};
+    data?.forEach((row: { workplan_item_id: string }) => {
+      counts[row.workplan_item_id] = (counts[row.workplan_item_id] ?? 0) + 1;
+    });
+    setEvidenceCounts(counts);
+  }, [appraisalId, items]);
+
+  useEffect(() => {
+    fetchEvidenceCounts();
+  }, [fetchEvidenceCounts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -770,6 +810,13 @@ export function WorkplanSection({
     }
   }, [canEditManagerWorkplanRatings, workplan?.id, appraisalId, items, loadWorkplan, onDirtyChange]);
 
+  useEffect(() => {
+    if (!registerSave) return;
+    const save = () => (canEditManagerWorkplanRatings ? saveManagerWorkplan() : saveWorkplan());
+    registerSave(save);
+    return () => registerSave(null);
+  }, [registerSave, canEditManagerWorkplanRatings, saveManagerWorkplan, saveWorkplan]);
+
   const submitForApproval = useCallback(async () => {
     if (!canSubmitForApproval) return;
     setSubmitting(true);
@@ -1004,6 +1051,30 @@ export function WorkplanSection({
           </div>
           {canEditPlanningFields && (
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              {workplan?.imported_from_file && (
+                <span className="text-[11px] text-[#0d9488] bg-[#f0fdfa] border border-[#99f6e4] px-3 py-1 rounded-full">
+                  Imported from {workplan.imported_from_file}
+                  <button
+                    type="button"
+                    onClick={() => setShowUploadModal(true)}
+                    className="ml-2 underline hover:no-underline"
+                  >
+                    Re-import
+                  </button>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-[8px] bg-[#f0fdfa] text-[#0d9488] border border-[#99f6e4] text-[11px] font-semibold hover:bg-[#ecfdf5] transition-colors"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Import from Excel
+              </button>
               <button
                 onClick={addRow}
                 disabled={!workplan?.id}
@@ -1073,8 +1144,78 @@ export function WorkplanSection({
           )}
         </div>
 
+        {workplan && workplan.status !== "draft" && (
+          <div className="flex items-center gap-2 px-5 py-3 bg-[#fffbeb] border-b border-[#fcd34d]">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0110 0v4" />
+            </svg>
+            <p className="text-[11px] text-[#92400e]">
+              Workplan is locked — use Check-ins to track progress
+            </p>
+          </div>
+        )}
+
         {/* Table */}
-        {items.length === 0 ? (
+        {items.length === 0 && workplan?.status === "draft" && canEditPlanningFields ? (
+          <div className="border-2 border-dashed border-[#dde5f5] rounded-[14px] p-12 flex flex-col items-center text-center">
+            <div className="w-12 h-12 rounded-[14px] bg-[#f8faff] border border-[#dde5f5] flex items-center justify-center mb-4">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8a97b8" strokeWidth="1.5">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="12" y1="18" x2="12" y2="12" />
+                <line x1="9" y1="15" x2="15" y2="15" />
+              </svg>
+            </div>
+            <p className="font-['Sora'] text-[14px] font-bold text-[#0f1f3d] mb-2">
+              No objectives yet
+            </p>
+            <p className="text-[12px] text-[#8a97b8] max-w-[360px] leading-relaxed mb-6">
+              Add objectives manually or import from your Excel workplan template
+            </p>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-[480px]">
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(true)}
+                className="border border-[#99f6e4] rounded-[12px] p-4 bg-[#f0fdfa] text-left hover:bg-[#ecfdf5] transition-colors group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-white border border-[#6ee7b7] flex items-center justify-center mb-3">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </div>
+                <p className="text-[12px] font-semibold text-[#0f766e] mb-1">Import from Excel</p>
+                <p className="text-[10px] text-[#0d9488] leading-relaxed">
+                  Upload .xlsx — AI maps columns automatically
+                </p>
+                <p className="text-[10px] font-semibold text-[#0d9488] mt-3 group-hover:underline">
+                  Import workplan →
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={addRow}
+                className="border border-[#dde5f5] rounded-[12px] p-4 bg-[#f8faff] text-left hover:border-[#0f1f3d] transition-colors group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-white border border-[#dde5f5] flex items-center justify-center mb-3">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4a5a82" strokeWidth="2">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </div>
+                <p className="text-[12px] font-semibold text-[#0f1f3d] mb-1">Add manually</p>
+                <p className="text-[10px] text-[#8a97b8] leading-relaxed">
+                  Enter objectives one by one using the form
+                </p>
+                <p className="text-[10px] font-semibold text-[#4a5a82] mt-3 group-hover:underline">
+                  Add objective →
+                </p>
+              </button>
+            </div>
+          </div>
+        ) : items.length === 0 ? (
           <div style={{ padding: "32px 24px", textAlign: "center" }}>
             <p style={{ color: "#8a97b8", fontSize: "13px" }}>
               No objectives defined yet.{" "}
@@ -1088,7 +1229,7 @@ export function WorkplanSection({
               style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}
             >
               <colgroup>
-                {!(canEditPlanningFields || showActualResults) ? (
+                {!showTargetColumn ? (
                   <>
                     <col style={{ width: "22%" }} />
                     <col style={{ width: "22%" }} />
@@ -1140,10 +1281,11 @@ export function WorkplanSection({
                   <th style={thStyle}>Major Tasks</th>
                   <th style={thStyle}>Key Outputs</th>
                   <th style={thStyle}>Performance Standard</th>
-                  {(canEditPlanningFields || showActualResults) && <th style={thStyle}>Target</th>}
+                  {showTargetColumn && <th style={thStyle}>Target</th>}
                   <th style={{ ...thStyle, textAlign: "center", paddingRight: "16px" }}>Weighting</th>
                   {showActualResults && <th style={thStyle}>Actual YTD</th>}
                   {status === "MANAGER_REVIEW" && <th style={thStyle}>Result %</th>}
+                  {showActualResults && <th style={thStyle}>Evidence</th>}
                   {showActualResults && <th style={thStyle}>Points</th>}
                   {canEditPlanningFields && <th style={thStyle}>Actions</th>}
                 </tr>
@@ -1272,7 +1414,7 @@ export function WorkplanSection({
                       )}
                     </td>
                     {/* Target column: DRAFT = type-specific input; after DRAFT = read-only. When DRAFT, "change type" opens type picker. */}
-                    {(canEditPlanningFields || showActualResults) && (
+                    {showTargetColumn && (
                       <td style={tdStyle}>
                         {canEditPlanningFields ? (
                           <>
@@ -1354,13 +1496,15 @@ export function WorkplanSection({
                       {canEditPlanningFields ? (
                         <input type="number" min={0} max={100} style={{ ...inputStyle, width: "22px" }} value={row.weight === 0 ? "" : row.weight} onChange={(e) => updateRow(row.id, "weight", e.target.value === "" ? 0 : Number(e.target.value))} onFocus={(e) => { e.target.style.borderColor = "#3b82f6"; e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.1)"; }} onBlur={(e) => { e.target.style.borderColor = "#dde5f5"; e.target.style.boxShadow = "none"; }} />
                       ) : (
-                        <div className="relative group flex justify-center">
-                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-full bg-[#0f1f3d] text-white text-[11px] font-bold cursor-default">
-                            {row.weight}%
-                          </span>
-                          {showActualResults && (
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150">
-                              <div className="bg-[#0f1f3d] text-white rounded-lg px-3 py-2.5 shadow-lg text-[10px] whitespace-nowrap">
+                        <div className="flex justify-center">
+                          {showActualResults ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-full bg-[#0f1f3d] text-white text-[11px] font-bold cursor-default">
+                                  {row.weight}%
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={8} className="border-0 bg-[#0f1f3d] px-3 py-2.5 text-white shadow-lg">
                                 <div className="font-bold text-[11px] mb-1.5 text-white/70 uppercase tracking-wide">
                                   Grade Thresholds
                                 </div>
@@ -1371,7 +1515,7 @@ export function WorkplanSection({
                                   { g: "D", mult: 0.4, color: "#fbbf24" },
                                   { g: "E", mult: 0.2, color: "#f87171" },
                                 ].map(({ g, mult, color }) => (
-                                  <div key={g} className="flex items-center gap-2 py-0.5">
+                                  <div key={g} className="flex items-center gap-2 py-0.5 text-[10px] whitespace-nowrap">
                                     <span className="font-bold w-3" style={{ color }}>{g}</span>
                                     <span className="text-white/60">×{mult}</span>
                                     <span className="text-white font-semibold ml-auto">
@@ -1379,9 +1523,12 @@ export function WorkplanSection({
                                     </span>
                                   </div>
                                 ))}
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#0f1f3d]" />
-                              </div>
-                            </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-full bg-[#0f1f3d] text-white text-[11px] font-bold cursor-default">
+                              {row.weight}%
+                            </span>
                           )}
                         </div>
                       )}
@@ -1530,6 +1677,17 @@ export function WorkplanSection({
                     )}
                     {showActualResults && (
                       <td style={tdStyle}>
+                        <EvidenceBadge
+                          workplanItemId={row.id}
+                          appraisalId={appraisalId}
+                          evidenceCount={evidenceCounts[row.id] ?? 0}
+                          role={isEmployee ? "EMPLOYEE" : isHR ? "HR" : "MANAGER"}
+                          onManage={() => setActiveEvidenceItem(row)}
+                        />
+                      </td>
+                    )}
+                    {showActualResults && (
+                      <td style={tdStyle}>
                         {status === "MANAGER_REVIEW" && (row.mgr_result != null || calcMgrResult(row) != null) ? (() => {
                           const mgrRes = row.mgr_result ?? calcMgrResult(row);
                           const empPts = row.points ?? calculatePoints(row.weight, row.actual_result) ?? 0;
@@ -1582,7 +1740,7 @@ export function WorkplanSection({
               </tbody>
               <tfoot>
                 <tr style={{ background: "#f8faff" }}>
-                  <td colSpan={canEditPlanningFields ? 6 : !(canEditPlanningFields || showActualResults) ? 4 : 5} style={{ ...tdStyle, textAlign: "right", border: "none" }}>
+                  <td colSpan={canEditPlanningFields ? 6 : !showTargetColumn ? 4 : showActualResults ? 6 : 5} style={{ ...tdStyle, textAlign: "right", border: "none" }}>
                     <span style={{ fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#8a97b8" }}>TOTAL</span>
                   </td>
                   <td style={{ ...tdStyle, border: "none", textAlign: "center" }}>
@@ -1592,6 +1750,7 @@ export function WorkplanSection({
                     <>
                       <td style={{ ...tdStyle, border: "none" }} />
                       {status === "MANAGER_REVIEW" && <td style={{ ...tdStyle, border: "none" }} />}
+                      <td style={{ ...tdStyle, border: "none" }} />
                       <td style={{ ...tdStyle, border: "none", textAlign: "right" }}>
                         <span style={{ fontFamily: "Sora, sans-serif", fontSize: "15px", fontWeight: 700, color: "#1d4ed8" }}>{getTotalPoints(items).toFixed(1)}</span>
                       </td>
@@ -1620,6 +1779,37 @@ export function WorkplanSection({
           />
         );
       })()}
+
+      {/* Evidence modal */}
+      {activeEvidenceItem && (
+        <EvidenceModal
+          workplanItem={{
+            id: activeEvidenceItem.id,
+            major_task: activeEvidenceItem.major_task,
+            corporate_objective: activeEvidenceItem.corporate_objective ?? "",
+          }}
+          appraisalId={appraisalId}
+          role={isEmployee ? "EMPLOYEE" : isHR ? "HR" : "MANAGER"}
+          onClose={() => setActiveEvidenceItem(null)}
+          onSaved={() => {
+            fetchEvidenceCounts();
+            setActiveEvidenceItem(null);
+          }}
+        />
+      )}
+
+      {/* Excel workplan upload modal */}
+      {showUploadModal && workplan?.id && (
+        <WorkplanUploadModal
+          appraisalId={appraisalId}
+          workplanId={workplan.id}
+          onComplete={() => {
+            loadWorkplan();
+            setShowUploadModal(false);
+          }}
+          onClose={() => setShowUploadModal(false)}
+        />
+      )}
 
       {/* Reject Modal */}
       {rejectModalOpen && (

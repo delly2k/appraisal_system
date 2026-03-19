@@ -18,11 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RatingButtons } from "./RatingButtons";
 import {
-  RatingPillGroup,
   RatingGradeChip,
   RatingLegend,
-  isGrade,
   VarianceChip,
 } from "./RatingPillGroup";
 import { Button } from "@/components/ui/button";
@@ -41,9 +40,10 @@ interface TechnicalCompetency {
   display_order: number;
 }
 
-interface RatingScale {
+interface RatingScaleRow {
   code: string;
   label: string;
+  factor?: number;
 }
 
 interface TechnicalCompetenciesSectionProps {
@@ -55,6 +55,8 @@ interface TechnicalCompetenciesSectionProps {
   canEditManagerRatings: boolean;
   /** Optional: notify parent when dirty state changes (for tab navigation guard). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Optional: register save function for parent (e.g. unsaved-changes modal Save). */
+  registerSave?: (save: (() => Promise<void>) | null) => void;
 }
 
 const PlusIcon = () => (
@@ -113,8 +115,11 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px solid #dde5f5",
 };
 
-/** Grade factor for row score: weight × factor(manager_rating). Matches rating_scale. */
-const GRADE_FACTOR: Record<string, number> = { A: 1, B: 0.8, C: 0.6, D: 0.4, E: 0.2 };
+function getFactorFromScale(code: string | null, scale: RatingScaleRow[]): number {
+  if (!code) return 0;
+  const row = scale.find((s) => s.code === code);
+  return row?.factor != null ? Number(row.factor) : 0;
+}
 
 const textareaStyle: React.CSSProperties = {
   width: "100%",
@@ -139,19 +144,20 @@ export function TechnicalCompetenciesSection({
   canEditSelfRatings,
   canEditManagerRatings,
   onDirtyChange,
+  registerSave,
 }: TechnicalCompetenciesSectionProps) {
   const [isDirty, setIsDirty] = useState(false);
   useUnsavedChanges(isDirty);
 
   const [competencies, setCompetencies] = useState<TechnicalCompetency[]>([]);
-  const [ratingScale, setRatingScale] = useState<RatingScale[]>([]);
+  const [ratingScale, setRatingScale] = useState<RatingScaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCompName, setNewCompName] = useState("");
-  const [newCompLevel, setNewCompLevel] = useState("C");
+  const [newCompLevel, setNewCompLevel] = useState("6");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -173,7 +179,7 @@ export function TechnicalCompetenciesSection({
       const supabase = createClient();
       const { data: scaleData } = await supabase
         .from("rating_scale")
-        .select("code, label")
+        .select("code, label, factor")
         .order("factor", { ascending: false });
 
       setRatingScale(scaleData ?? []);
@@ -209,7 +215,7 @@ export function TechnicalCompetenciesSection({
 
       setShowAddModal(false);
       setNewCompName("");
-      setNewCompLevel("C");
+      setNewCompLevel("6");
       loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add competency");
@@ -287,6 +293,12 @@ export function TechnicalCompetenciesSection({
       setSaving(false);
     }
   }, [appraisalId, competencies, onDirtyChange]);
+
+  useEffect(() => {
+    if (!registerSave) return;
+    registerSave(saveRatings);
+    return () => registerSave(null);
+  }, [registerSave, saveRatings]);
 
   const canEdit = canEditSelfRatings || canEditManagerRatings;
   const canEditOrSetup = canEdit || canEditSetup;
@@ -475,8 +487,8 @@ export function TechnicalCompetenciesSection({
                           onFocus={(e) => { e.target.style.borderColor = "#3b82f6"; e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.1)"; }}
                           onBlur={(e) => { e.target.style.borderColor = "#dde5f5"; e.target.style.boxShadow = "none"; }}
                         >
-                          {(["A", "B", "C", "D", "E"] as const).map((g) => (
-                            <option key={g} value={g}>{g}</option>
+                          {ratingScale.map((s) => (
+                            <option key={s.code} value={s.code}>{s.code}</option>
                           ))}
                         </select>
                       ) : (
@@ -544,16 +556,10 @@ export function TechnicalCompetenciesSection({
                     <td style={{ ...tdStyle, minWidth: "340px" }}>
                       <div className="flex flex-col items-center gap-1">
                         {canEditSelfRatings ? (
-                          <RatingPillGroup
-                            name={`tech-self-${comp.id}`}
-                            value={
-                              comp.self_rating && isGrade(comp.self_rating)
-                                ? comp.self_rating
-                                : null
-                            }
-                            onChange={(v) =>
-                              updateCompetency(comp.id, "self_rating", v)
-                            }
+                          <RatingButtons
+                            value={comp.self_rating ?? null}
+                            onChange={(code) => updateCompetency(comp.id, "self_rating", code)}
+                            disabled={false}
                           />
                         ) : (
                           <RatingGradeChip value={comp.self_rating ?? null} />
@@ -584,16 +590,10 @@ export function TechnicalCompetenciesSection({
                     </td>
                     <td style={tdStyle}>
                       {canEditManagerRatings ? (
-                        <RatingPillGroup
-                          name={`tech-mgr-${comp.id}`}
-                          value={
-                            comp.manager_rating && isGrade(comp.manager_rating)
-                              ? comp.manager_rating
-                              : null
-                          }
-                          onChange={(v) =>
-                            updateCompetency(comp.id, "manager_rating", v)
-                          }
+                        <RatingButtons
+                          value={comp.manager_rating ?? null}
+                          onChange={(code) => updateCompetency(comp.id, "manager_rating", code)}
+                          disabled={false}
                         />
                       ) : (
                         <RatingGradeChip value={comp.manager_rating ?? null} />
@@ -631,7 +631,7 @@ export function TechnicalCompetenciesSection({
                         }}
                       >
                         {(comp.manager_rating ?? comp.self_rating) != null
-                          ? (comp.weight * (GRADE_FACTOR[comp.manager_rating ?? comp.self_rating ?? ""] ?? 0)).toFixed(1)
+                          ? (comp.weight * getFactorFromScale(comp.manager_rating ?? comp.self_rating ?? null, ratingScale)).toFixed(1)
                           : "—"}
                       </span>
                     </td>
@@ -665,7 +665,7 @@ export function TechnicalCompetenciesSection({
                   const techTotal = competencies.reduce(
                     (sum, comp) => {
                       const code = comp.manager_rating ?? comp.self_rating;
-                      return sum + (code != null ? comp.weight * (GRADE_FACTOR[code] ?? 0) : 0);
+                      return sum + (code != null ? comp.weight * getFactorFromScale(code, ratingScale) : 0);
                     },
                     0
                   );

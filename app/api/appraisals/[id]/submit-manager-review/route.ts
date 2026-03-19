@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
-import { transitionStatus } from "@/lib/appraisal-workflow";
 import { isAppraisalStatus } from "@/types/appraisal";
 import { resolveManagerSystemUserId } from "@/lib/hrmis-approval-auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
@@ -56,19 +55,8 @@ export async function POST(
       return NextResponse.json({ error: message, blockers: report?.blockers }, { status: 400 });
     }
 
-    const { error: transErr } = await transitionStatus(
-      supabase,
-      appraisalId,
-      "PENDING_SIGNOFF",
-      user.id,
-      "Manager review submitted"
-    );
-
-    if (transErr) {
-      return NextResponse.json({ error: transErr }, { status: 400 });
-    }
-
-    return NextResponse.json({ success: true, status: "PENDING_SIGNOFF" });
+    // Do not change status here. The only path to PENDING_SIGNOFF is via Sign-offs tab → "Generate PDF & send via Adobe Sign" (signoff/submit).
+    return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

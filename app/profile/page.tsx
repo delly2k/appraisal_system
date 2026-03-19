@@ -44,7 +44,7 @@ async function getActiveCycleAppraisals(employeeId: string): Promise<{
     .eq("employee_id", employeeId)
     .eq("cycle_id", activeCycle.id)
     .eq("is_active", true)
-    .in("review_type", ["mid_year", "annual", "MID_YEAR", "ANNUAL"]);
+    .eq("review_type", "annual");
 
   return {
     appraisals: (appraisals || []).map((a) => ({

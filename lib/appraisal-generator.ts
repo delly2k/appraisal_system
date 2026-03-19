@@ -26,9 +26,8 @@ export interface GenerateResult {
 
 /**
  * Generate appraisal records for employees eligible in Dynamics (filter at generation time).
- * Creates one appraisal per eligible employee per review type enabled for the cycle (from cycle_review_types).
+ * Creates one ANNUAL appraisal per eligible employee per cycle. Skips if one already exists.
  * Only employees that exist in Supabase `employees` are included (FK and is_management trigger).
- * Respects unique (cycle_id, employee_id, review_type); skips combinations that already exist.
  * Manager and division come from Dynamics xrm1_employees; is_management set by DB trigger from employees.
  */
 export async function generateAppraisalsForCycle(
@@ -46,22 +45,6 @@ export async function generateAppraisalsForCycle(
     throw new Error(
       cycleError?.message ?? "Appraisal cycle not found"
     );
-  }
-
-  const { data: reviewTypes, error: rtError } = await supabase
-    .from("cycle_review_types")
-    .select("review_type")
-    .eq("cycle_id", cycleId);
-
-  if (rtError) {
-    throw new Error(`Failed to load cycle review types: ${rtError.message}`);
-  }
-
-  const types = (reviewTypes ?? [])
-    .map((r) => r.review_type as "quarterly" | "mid_year" | "annual")
-    .filter((t) => t !== "quarterly");
-  if (types.length === 0) {
-    return { cycleName: cycle.name, appraisalsCreated: 0 };
   }
 
   const eligibleXrm = await getEligibleEmployeesForAppraisal({
@@ -113,14 +96,13 @@ export async function generateAppraisalsForCycle(
     managerByEmployee.set(e.employee_id, e.manager_employee_id);
   }
 
-  const { data: existing } = await supabase
+  const { data: existingRows } = await supabase
     .from("appraisals")
-    .select("employee_id, review_type")
-    .eq("cycle_id", cycleId);
+    .select("employee_id")
+    .eq("cycle_id", cycleId)
+    .eq("review_type", "annual");
 
-  const existingKeys = new Set(
-    (existing ?? []).map((r) => `${r.employee_id}:${r.review_type}`)
-  );
+  const hasExisting = new Set((existingRows ?? []).map((r) => r.employee_id));
 
   const rows: Array<{
     cycle_id: string;
@@ -133,22 +115,18 @@ export async function generateAppraisalsForCycle(
     is_active: boolean;
   }> = [];
 
-  for (const reviewType of types) {
-    for (const e of employees) {
-      const key = `${e.employee_id}:${reviewType}`;
-      if (existingKeys.has(key)) continue;
-      existingKeys.add(key);
-      rows.push({
-        cycle_id: cycleId,
-        employee_id: e.employee_id,
-        manager_employee_id: managerByEmployee.get(e.employee_id) ?? null,
-        division_id: e.division_id ?? null,
-        review_type: reviewType,
-        status: "DRAFT",
-        purpose: "end_of_year",
-        is_active: reviewType === "annual" ? false : true,
-      });
-    }
+  for (const e of employees) {
+    if (hasExisting.has(e.employee_id)) continue;
+    rows.push({
+      cycle_id: cycleId,
+      employee_id: e.employee_id,
+      manager_employee_id: managerByEmployee.get(e.employee_id) ?? null,
+      division_id: e.division_id ?? null,
+      review_type: "annual",
+      status: "DRAFT",
+      purpose: "end_of_year",
+      is_active: true,
+    });
   }
 
   if (rows.length === 0) {
