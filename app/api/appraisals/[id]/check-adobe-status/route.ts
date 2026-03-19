@@ -45,6 +45,12 @@ function adobeStatusKey(raw: unknown): string {
     .replace(/-/g, "_");
 }
 
+/** Adobe REST v6 may expose lifecycle in `status`, `agreementStatus`, or `state`. */
+function extractRawAdobeStatus(adobe: Record<string, unknown>): unknown {
+  const nested = adobe.agreement as Record<string, unknown> | undefined;
+  return adobe.status ?? adobe.agreementStatus ?? adobe.state ?? nested?.status ?? nested?.state;
+}
+
 function memberSignedStatus(status: string | undefined): boolean {
   const s = (status ?? "").toUpperCase();
   return (
@@ -151,11 +157,27 @@ export async function POST(
       .maybeSingle();
 
     if (aggErr || !agreementRow?.adobe_agreement_id) {
-      return NextResponse.json({ error: "No Adobe agreement found for this appraisal" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No Adobe agreement found for this appraisal", adobeStatus: null, adobeRawStatus: null },
+        { status: 404 }
+      );
     }
 
+    const adobeApiBase =
+      process.env.ADOBE_SIGN_API_BASE ?? "https://api.na2.adobesign.com/api/rest/v6";
+
     const adobe = await getAgreementStatus(agreementRow.adobe_agreement_id);
-    const adobeStatus = adobeStatusKey(adobe.status);
+    const rawStatus = extractRawAdobeStatus(adobe);
+    const adobeStatus = adobeStatusKey(rawStatus);
+
+    console.log("[check-adobe-status]", {
+      appraisalId,
+      adobeAgreementId: agreementRow.adobe_agreement_id,
+      adobeApiBase,
+      rawStatus: rawStatus != null ? String(rawStatus) : null,
+      adobeStatusNormalized: adobeStatus,
+      topLevelKeys: Object.keys(adobe).slice(0, 40),
+    });
 
     const { data: emp } = await supabase
       .from("employees")
@@ -313,12 +335,28 @@ export async function POST(
       .single();
 
     if (readErr || !updated) {
-      return NextResponse.json({ error: readErr?.message ?? "Failed to read agreement" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: readErr?.message ?? "Failed to read agreement",
+          adobeStatus: adobeStatus || null,
+          adobeRawStatus: rawStatus != null ? String(rawStatus) : null,
+          adobeApiBase,
+        },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ agreement: updated, adobeStatus: adobeStatus || String(adobe.status ?? "") });
+    return NextResponse.json({
+      agreement: updated,
+      adobeStatus: adobeStatus || String(rawStatus ?? ""),
+      adobeRawStatus: rawStatus != null ? String(rawStatus) : "",
+      adobeApiBase,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: message, adobeStatus: null, adobeRawStatus: null },
+      { status: 500 }
+    );
   }
 }

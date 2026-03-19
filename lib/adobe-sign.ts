@@ -3,7 +3,8 @@
  * Uses integration key (Bearer) auth; configure ADOBE_SIGN_INTEGRATION_KEY and ADOBE_SIGN_API_BASE.
  */
 
-const BASE = process.env.ADOBE_SIGN_API_BASE ?? "https://api.na4.adobesign.com/api/rest/v6";
+/** Match your Adobe shard (na2 if you use na2.documents.adobe.com). Set ADOBE_SIGN_API_BASE on Vercel if different. */
+const BASE = process.env.ADOBE_SIGN_API_BASE ?? "https://api.na2.adobesign.com/api/rest/v6";
 const KEY = process.env.ADOBE_SIGN_INTEGRATION_KEY ?? "";
 
 const headers: Record<string, string> = {
@@ -114,11 +115,25 @@ export async function downloadSignedPDF(agreementId: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-/** Get agreement details/status. */
+/** Get agreement details/status (GET /agreements/{id}). */
 export async function getAgreementStatus(agreementId: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${BASE}/agreements/${agreementId}`, { headers });
-  if (!res.ok) throw new Error(`Adobe Sign get status failed: ${res.status}`);
-  return (await res.json()) as Record<string, unknown>;
+  const url = `${BASE}/agreements/${agreementId}`;
+  const res = await fetch(url, { headers });
+  const bodyText = await res.text();
+  let data: Record<string, unknown>;
+  try {
+    data = bodyText ? (JSON.parse(bodyText) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error(`Adobe Sign get status: invalid JSON (HTTP ${res.status}): ${bodyText.slice(0, 240)}`);
+  }
+  if (!res.ok) {
+    const code = data.code as string | undefined;
+    const msg = (data.message as string | undefined) ?? bodyText.slice(0, 400);
+    throw new Error(
+      `Adobe Sign get status failed: HTTP ${res.status}${code ? ` code=${code}` : ""} — ${msg}. Verify ADOBE_SIGN_API_BASE matches your shard (e.g. https://api.na2.adobesign.com/api/rest/v6).`
+    );
+  }
+  return data;
 }
 
 /** Send a reminder to the next signer(s). */

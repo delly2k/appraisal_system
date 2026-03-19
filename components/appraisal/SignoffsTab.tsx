@@ -193,6 +193,7 @@ export function SignoffsTab({
   const uiState = (() => {
     if (status === "MANAGER_REVIEW") return "READY_TO_SUBMIT";
     if (status === "PENDING_SIGNOFF") {
+      if (agreement?.status === "SIGNED") return "COMPLETE";
       if (agreement?.status === "DECLINED") return "DECLINED";
       if (agreement?.status === "CANCELLED" || agreement?.status === "EXPIRED") return "CANCELLED";
       return "IN_PROGRESS";
