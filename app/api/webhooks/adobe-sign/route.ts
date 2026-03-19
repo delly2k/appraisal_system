@@ -3,6 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { downloadSignedPDF } from "@/lib/adobe-sign";
 import { sendNotification, type SupabaseLike } from "@/lib/notifications";
 
+// Adobe Sign sends a GET request to verify webhook reachability.
+export async function GET() {
+  return new Response("OK", { status: 200 });
+}
+
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
