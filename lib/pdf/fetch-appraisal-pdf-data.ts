@@ -6,7 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildSummaryInput } from "@/lib/appraisal-summary-input";
 import { getReportingStructure, getReportingStructureFromDynamics } from "@/lib/reporting-structure";
-import { calcSummary, GRADE_BANDS } from "@/lib/summary-calc";
+import { calcSummary, GRADE_BANDS, type SummaryResult } from "@/lib/summary-calc";
 
 export interface WorkplanItemRow {
   corporate_objective: string;
@@ -241,7 +241,7 @@ export async function fetchAppraisalPDFData(
     manager_comments: r.manager_comments != null ? String(r.manager_comments) : null,
   }));
 
-  let summaryResult: { totalPoints: number; overallGrade: string; components: { key: string; points: number; actual: number }[] } | null = null;
+  let summaryResult: SummaryResult | null = null;
   try {
     const input = await buildSummaryInput(appraisalId, supabase, { showLeadership });
     summaryResult = calcSummary(input);
