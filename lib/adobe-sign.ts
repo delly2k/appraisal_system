@@ -38,43 +38,30 @@ export async function uploadTransientDocument(
 export interface CreateAgreementParams {
   transientDocumentId: string;
   agreementName: string;
-  employee: { email: string; name: string };
-  manager: { email: string; name: string };
-  hrOfficer: { email: string; name: string };
+  signers: { email: string; name: string }[];
   webhookUrl: string;
 }
 
-/** Create agreement with three signers in order: Employee → Manager → HR. */
+/** Create agreement with signers in the provided order. */
 export async function createAgreement(params: CreateAgreementParams): Promise<string> {
   const {
     transientDocumentId,
     agreementName,
-    employee,
-    manager,
-    hrOfficer,
+    signers,
     webhookUrl,
   } = params;
+  void webhookUrl;
+
+  const participantSetsInfo = signers.map((signer, idx) => ({
+    order: idx + 1,
+    role: "SIGNER",
+    memberInfos: [{ email: signer.email, name: signer.name }],
+  }));
 
   const body = {
     fileInfos: [{ transientDocumentId }],
     name: agreementName,
-    participantSetsInfo: [
-      {
-        order: 1,
-        role: "SIGNER",
-        memberInfos: [{ email: employee.email, name: employee.name }],
-      },
-      {
-        order: 2,
-        role: "SIGNER",
-        memberInfos: [{ email: manager.email, name: manager.name }],
-      },
-      {
-        order: 3,
-        role: "SIGNER",
-        memberInfos: [{ email: hrOfficer.email, name: hrOfficer.name }],
-      },
-    ],
+    participantSetsInfo,
     signatureType: "ESIGN",
     state: "IN_PROCESS",
     expirationTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),

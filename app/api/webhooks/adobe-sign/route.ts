@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { downloadSignedPDF } from "@/lib/adobe-sign";
 import { sendNotification, type SupabaseLike } from "@/lib/notifications";
+import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 
 // Adobe Sign webhook verification expects client ID echoed in response header.
 export async function GET(req: NextRequest) {
@@ -64,16 +65,31 @@ export async function POST(req: NextRequest) {
     .eq("employee_id", appraisal.manager_employee_id)
     .single();
 
-  const { data: hrUser } = await supabase
+  const { data: managerUser } = await supabase
     .from("app_users")
-    .select("employee_id, email, display_name")
-    .in("role", ["hr", "admin"])
+    .select("role")
+    .eq("employee_id", appraisal.manager_employee_id)
+    .in("role", ["gm", "admin"])
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
 
-  let hrOfficerEmployeeId: string | null = null;
-  if (hrUser?.employee_id) hrOfficerEmployeeId = hrUser.employee_id;
+  const hodEmployeeId = await resolveDepartmentHeadSystemUserId(appraisal.employee_id);
+  const { data: hod } = hodEmployeeId
+    ? await supabase
+        .from("employees")
+        .select("employee_id, email, full_name")
+        .eq("employee_id", hodEmployeeId)
+        .single()
+    : { data: null };
+
+  const managerActsAsFinalApprover =
+    appraisal.manager_employee_id === hodEmployeeId || !!managerUser;
+  const testOnlyEmployeeSigner = process.env.ALLOW_APPRAISAL_TEST_BYPASS === "true";
+  const managerIsInChain = !testOnlyEmployeeSigner && !managerActsAsFinalApprover;
+  const finalSignerEmployeeId = testOnlyEmployeeSigner
+    ? appraisal.employee_id
+    : (managerActsAsFinalApprover ? appraisal.manager_employee_id : hodEmployeeId);
 
   const actionInfo = body.actionInfo as { participantEmail?: string; comment?: string } | undefined;
   const signerEmail = actionInfo?.participantEmail as string | undefined;
@@ -84,7 +100,7 @@ export async function POST(req: NextRequest) {
 
       if (signerEmail === emp?.email) {
         updates.employee_signed_at = new Date().toISOString();
-        if (mgr?.employee_id) {
+        if (managerIsInChain && mgr?.employee_id) {
           await sendNotification(
             {
               recipientEmployeeId: mgr.employee_id,
@@ -94,13 +110,23 @@ export async function POST(req: NextRequest) {
             },
             supabase as unknown as SupabaseLike
           );
-        }
-      } else if (signerEmail === mgr?.email) {
-        updates.manager_signed_at = new Date().toISOString();
-        if (hrOfficerEmployeeId) {
+        } else if (!testOnlyEmployeeSigner && !managerActsAsFinalApprover && hod?.employee_id) {
           await sendNotification(
             {
-              recipientEmployeeId: hrOfficerEmployeeId,
+              recipientEmployeeId: hod.employee_id,
+              type: "SIGNOFF_ACTION_REQUIRED",
+              message: `${emp?.full_name ?? "Employee"} has signed their appraisal. Check your email from Adobe Sign to complete sign-off.`,
+              appraisalId: agreement.appraisal_id,
+            },
+            supabase as unknown as SupabaseLike
+          );
+        }
+      } else if (managerIsInChain && signerEmail === mgr?.email) {
+        updates.manager_signed_at = new Date().toISOString();
+        if (hod?.employee_id) {
+          await sendNotification(
+            {
+              recipientEmployeeId: hod.employee_id,
               type: "SIGNOFF_ACTION_REQUIRED",
               message: `Manager has signed the appraisal for ${emp?.full_name ?? "Employee"}. Check your email from Adobe Sign to complete sign-off.`,
               appraisalId: agreement.appraisal_id,
@@ -144,8 +170,12 @@ export async function POST(req: NextRequest) {
         .update({ status: "HOD_REVIEW" })
         .eq("id", agreement.appraisal_id);
 
-      const recipients = [appraisal.employee_id, appraisal.manager_employee_id].filter(Boolean);
-      if (hrOfficerEmployeeId) recipients.push(hrOfficerEmployeeId);
+      const recipients = Array.from(
+        new Set(
+          [appraisal.employee_id, managerIsInChain ? appraisal.manager_employee_id : null, finalSignerEmployeeId]
+            .filter((v): v is string => Boolean(v))
+        )
+      );
 
       for (const recipientEmployeeId of recipients) {
         await sendNotification(
@@ -206,10 +236,10 @@ export async function POST(req: NextRequest) {
         .update({ status: "MANAGER_REVIEW" })
         .eq("id", agreement.appraisal_id);
 
-      if (hrOfficerEmployeeId) {
+      if (finalSignerEmployeeId) {
         await sendNotification(
           {
-            recipientEmployeeId: hrOfficerEmployeeId,
+            recipientEmployeeId: finalSignerEmployeeId,
             type: "SIGNOFF_EXPIRED",
             message: `The sign-off agreement for ${emp?.full_name ?? "Employee"}'s appraisal has expired after 30 days. The appraisal has been returned to Manager Review.`,
             appraisalId: agreement.appraisal_id,

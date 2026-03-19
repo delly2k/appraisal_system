@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { generateAppraisalPDF } from "@/lib/appraisal-pdf";
 import { uploadTransientDocument, createAgreement } from "@/lib/adobe-sign";
+import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -134,24 +135,46 @@ export async function POST(
     if (!emp?.email) return NextResponse.json({ error: "Employee email not found" }, { status: 400 });
     if (!mgr?.email) return NextResponse.json({ error: "Manager email not found" }, { status: 400 });
 
-    const { data: hrUser } = await supabase
+    const { data: managerUser } = await supabase
       .from("app_users")
-      .select("employee_id, email, display_name")
-      .in("role", ["hr", "admin"])
+      .select("role")
+      .eq("employee_id", appraisal.manager_employee_id)
+      .in("role", ["gm", "admin"])
       .eq("is_active", true)
       .limit(1)
       .maybeSingle();
 
-    if (!hrUser?.email) return NextResponse.json({ error: "No HR officer configured" }, { status: 500 });
-
-    let hrName = hrUser.display_name ?? hrUser.email;
-    if (hrUser.employee_id) {
-      const { data: hrEmp } = await supabase
+    const hodEmployeeId = await resolveDepartmentHeadSystemUserId(appraisal.employee_id);
+    let hod = null as { full_name: string | null; email: string | null } | null;
+    if (hodEmployeeId) {
+      const { data: hodEmp } = await supabase
         .from("employees")
-        .select("full_name")
-        .eq("employee_id", hrUser.employee_id)
+        .select("full_name, email")
+        .eq("employee_id", hodEmployeeId)
         .single();
-      if (hrEmp?.full_name) hrName = hrEmp.full_name;
+      hod = hodEmp ?? null;
+    }
+
+    const managerActsAsFinalApprover =
+      appraisal.manager_employee_id === hodEmployeeId || !!managerUser;
+
+    const testOnlyEmployeeSigner = process.env.ALLOW_APPRAISAL_TEST_BYPASS === "true";
+
+    const signers: { email: string; name: string }[] = [
+      { email: emp.email, name: emp.full_name ?? "Employee" },
+    ];
+
+    if (!testOnlyEmployeeSigner) {
+      if (!managerActsAsFinalApprover) {
+        signers.push({ email: mgr.email, name: mgr.full_name ?? "Manager" });
+      }
+
+      if (managerActsAsFinalApprover) {
+        signers.push({ email: mgr.email, name: mgr.full_name ?? "Manager" });
+      } else {
+        if (!hod?.email) return NextResponse.json({ error: "No HOD configured" }, { status: 500 });
+        signers.push({ email: hod.email, name: hod.full_name ?? "HOD" });
+      }
     }
 
     const body = await req.json().catch(() => ({}));
@@ -180,9 +203,7 @@ export async function POST(
     const agreementId = await createAgreement({
       transientDocumentId: transientId,
       agreementName: `FY 2026 Annual Appraisal — ${emp.full_name ?? "Employee"}`,
-      employee: { email: emp.email, name: emp.full_name ?? "Employee" },
-      manager: { email: mgr.email, name: mgr.full_name ?? "Manager" },
-      hrOfficer: { email: hrUser.email, name: hrName },
+      signers,
       webhookUrl,
     });
 
