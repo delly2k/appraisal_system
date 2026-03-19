@@ -24,6 +24,52 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
+function normEmail(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase();
+}
+
+function emailsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = normEmail(a);
+  const nb = normEmail(b);
+  return na.length > 0 && nb.length > 0 && na === nb;
+}
+
+/** Adobe webhook payloads vary by account/version — try several paths. */
+function extractAgreementId(body: Record<string, unknown>): string | undefined {
+  const agreement = body.agreement as { id?: string } | undefined;
+  if (agreement?.id) return agreement.id;
+  const resource = body.resource as { id?: string } | undefined;
+  if (resource?.id) return resource.id;
+  const rid = body.resourceId ?? body.agreementId;
+  if (typeof rid === "string" && rid) return rid;
+  return undefined;
+}
+
+function extractWebhookEvent(body: Record<string, unknown>): string | undefined {
+  const e = body.event;
+  if (typeof e === "string" && e) return e;
+  const nested = body.webhookNotificationInfo as { event?: string } | undefined;
+  if (typeof nested?.event === "string" && nested.event) return nested.event;
+  const webhookEvent = body.webhookEvent;
+  if (typeof webhookEvent === "string" && webhookEvent) return webhookEvent;
+  return undefined;
+}
+
+function extractParticipantEmail(body: Record<string, unknown>): string | undefined {
+  const actionInfo = body.actionInfo as { participantEmail?: string } | undefined;
+  if (actionInfo?.participantEmail) return actionInfo.participantEmail;
+  const candidates = [
+    body.participantUserEmail,
+    body.actingUserEmail,
+    body.participantEmail,
+    (body.participantUserDetails as { email?: string } | undefined)?.email,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return undefined;
+}
+
 export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   let body: Record<string, unknown>;
@@ -33,8 +79,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const event = body.event as string | undefined;
-  const agreementId = (body.agreement as { id?: string })?.id as string | undefined;
+  const event = extractWebhookEvent(body);
+  const agreementId = extractAgreementId(body);
 
   if (!agreementId) return NextResponse.json({ ok: true });
 
@@ -92,14 +138,20 @@ export async function POST(req: NextRequest) {
     : (managerActsAsFinalApprover ? appraisal.manager_employee_id : hodEmployeeId);
 
   const actionInfo = body.actionInfo as { participantEmail?: string; comment?: string } | undefined;
-  const signerEmail = actionInfo?.participantEmail as string | undefined;
+  const signerEmail = extractParticipantEmail(body);
 
-  switch (event) {
+  const normalizedEvent =
+    event === "AGREEMENT_WORKFLOW_COMPLETED" || event === "WORKFLOW_COMPLETED"
+      ? "AGREEMENT_COMPLETED"
+      : event;
+
+  switch (normalizedEvent) {
     case "AGREEMENT_ACTION_COMPLETED": {
       const updates: Record<string, string> = { updated_at: new Date().toISOString() };
+      const now = new Date().toISOString();
 
-      if (signerEmail === emp?.email) {
-        updates.employee_signed_at = new Date().toISOString();
+      if (emailsMatch(signerEmail, emp?.email)) {
+        updates.employee_signed_at = now;
         if (managerIsInChain && mgr?.employee_id) {
           await sendNotification(
             {
@@ -121,8 +173,8 @@ export async function POST(req: NextRequest) {
             supabase as unknown as SupabaseLike
           );
         }
-      } else if (managerIsInChain && signerEmail === mgr?.email) {
-        updates.manager_signed_at = new Date().toISOString();
+      } else if (managerIsInChain && emailsMatch(signerEmail, mgr?.email)) {
+        updates.manager_signed_at = now;
         if (hod?.employee_id) {
           await sendNotification(
             {
@@ -135,7 +187,7 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        updates.hr_signed_at = new Date().toISOString();
+        updates.hr_signed_at = now;
       }
 
       await supabase.from("appraisal_agreements").update(updates).eq("id", agreement.id);
@@ -154,16 +206,19 @@ export async function POST(req: NextRequest) {
         .from("appraisal-pdfs")
         .createSignedUrl(signedPath, 60 * 60 * 24 * 365);
 
-      await supabase
-        .from("appraisal_agreements")
-        .update({
-          status: "SIGNED",
-          signed_pdf_url: urlData?.signedUrl ?? null,
-          signed_pdf_path: signedPath,
-          hr_signed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", agreement.id);
+      const completedAt = new Date().toISOString();
+      const completionUpdate: Record<string, string | null> = {
+        status: "SIGNED",
+        signed_pdf_url: urlData?.signedUrl ?? null,
+        signed_pdf_path: signedPath,
+        hr_signed_at: completedAt,
+        updated_at: completedAt,
+      };
+      if (testOnlyEmployeeSigner && !agreement.employee_signed_at) {
+        completionUpdate.employee_signed_at = completedAt;
+      }
+
+      await supabase.from("appraisal_agreements").update(completionUpdate).eq("id", agreement.id);
 
       await supabase
         .from("appraisals")
@@ -192,7 +247,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "AGREEMENT_DECLINED": {
-      const declinerEmail = (actionInfo?.participantEmail as string) ?? "";
+      const declinerEmail = extractParticipantEmail(body) ?? (actionInfo?.participantEmail as string) ?? "";
       const declineReason = (actionInfo?.comment as string) ?? "";
 
       await supabase
