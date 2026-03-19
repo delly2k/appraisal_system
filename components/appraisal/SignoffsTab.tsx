@@ -43,9 +43,10 @@ interface SignerRowProps {
   email: string | null;
   signedAt?: string | null;
   isCurrent: boolean;
+  totalSigners: number;
 }
 
-function SignerRow({ order, role, name, email, signedAt, isCurrent }: SignerRowProps) {
+function SignerRow({ order, role, name, email, signedAt, isCurrent, totalSigners }: SignerRowProps) {
   const signed = !!signedAt;
   const waiting = !signed && !isCurrent;
   const borderColor = signed ? "border-l-[#059669]" : isCurrent ? "border-l-[#d97706]" : "border-l-transparent";
@@ -102,7 +103,7 @@ function SignerRow({ order, role, name, email, signedAt, isCurrent }: SignerRowP
         </span>
       )}
       <p className="text-[10px] text-[#8a97b8] flex-shrink-0 text-right min-w-[110px]">
-        {signed ? formatDate(signedAt) : isCurrent ? `Signer ${order} of 3` : ""}
+        {signed ? formatDate(signedAt) : isCurrent ? `Signer ${order} of ${totalSigners}` : ""}
       </p>
     </div>
   );
@@ -115,7 +116,7 @@ const DOCUMENT_ITEMS = [
   "Technical competencies",
   "Productivity & Leadership",
   "Summary score & HR recommendation",
-  "Signature block (3 parties)",
+  "Signature block",
   "Evidence attachments index",
 ];
 
@@ -133,6 +134,7 @@ export function SignoffsTab({
   const [statusData, setStatusData] = useState<{
     agreement: AppraisalAgreement | null;
     signers: { employee: { full_name: string; email: string | null }; manager: { full_name: string; email: string | null }; hrOfficer: { full_name: string; email: string | null } };
+    signerChain?: { role: "EMPLOYEE" | "MANAGER" | "HOD"; name: string; email: string | null; signedAt: string | null }[];
     scores: { workplan: number; competency: number; overall: number; ratingLabel: string };
   } | null>(null);
   const [managerComments, setManagerComments] = useState("");
@@ -149,7 +151,7 @@ export function SignoffsTab({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/appraisals/${appraisalId}/signoff/status?showLeadership=${showLeadership ? "true" : "false"}`)
+    fetch(`/api/appraisals/${appraisalId}/signoff/status?showLeadership=${showLeadership ? "true" : "false"}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled && data) setStatusData(data);
@@ -163,6 +165,11 @@ export function SignoffsTab({
   const manager = statusData?.signers?.manager ?? { full_name: appraisal.managerName ?? "—", email: appraisal.managerEmail ?? null };
   const hrOfficer = statusData?.signers?.hrOfficer ?? { full_name: appraisal.hrOfficerName ?? "—", email: appraisal.hrOfficerEmail ?? null };
   const scores = statusData?.scores ?? { workplan: 0, competency: 0, overall: 0, ratingLabel: "—" };
+  const signerChain = statusData?.signerChain ?? [
+    { role: "EMPLOYEE" as const, name: employee.full_name, email: employee.email, signedAt: agreement?.employee_signed_at ?? null },
+    { role: "MANAGER" as const, name: manager.full_name, email: manager.email, signedAt: agreement?.manager_signed_at ?? null },
+    { role: "HOD" as const, name: hrOfficer.full_name, email: hrOfficer.email, signedAt: agreement?.hr_signed_at ?? null },
+  ];
 
   const uiState = (() => {
     if (status === "MANAGER_REVIEW") return "READY_TO_SUBMIT";
@@ -176,15 +183,16 @@ export function SignoffsTab({
   })();
 
   const canSubmit = (isAppraisalManager || isHR) && status === "MANAGER_REVIEW";
-  const signaturesCollected = agreement
-    ? [agreement.employee_signed_at, agreement.manager_signed_at, agreement.hr_signed_at].filter(Boolean).length
-    : 0;
+  const signaturesCollected = signerChain.filter((s) => !!s.signedAt).length;
+  const totalSigners = signerChain.length;
+  const currentSignerIndex = signerChain.findIndex((s) => !s.signedAt);
+  const currentSigner = currentSignerIndex >= 0 ? signerChain[currentSignerIndex] : null;
+  const currentRoleByUser = isEmployee ? "EMPLOYEE" : isAppraisalManager ? "MANAGER" : isHOD ? "HOD" : isHR ? "HR" : null;
   const isCurrentSignersTurn =
     uiState === "IN_PROGRESS" &&
     agreement &&
-    ((!agreement.employee_signed_at && isEmployee) ||
-      (agreement.employee_signed_at && !agreement.manager_signed_at && isAppraisalManager) ||
-      (agreement.manager_signed_at && !agreement.hr_signed_at && isHR));
+    !!currentSigner &&
+    ((currentRoleByUser === "HOD" && currentSigner.role === "HOD") || currentRoleByUser === currentSigner.role);
   const canCancel = uiState === "IN_PROGRESS" && (isAppraisalManager || isHR);
   const expiryDate = agreement?.created_at
     ? new Date(new Date(agreement.created_at).getTime() + 30 * 24 * 60 * 60 * 1000)
@@ -332,11 +340,16 @@ export function SignoffsTab({
             </div>
             <div className="px-5 py-4">
               <div className="flex items-center gap-3 mb-5">
-                <SignerOrderPill order={1} role="Employee" email={employee.email} />
-                <div className="flex-1 h-px bg-[#dde5f5]" />
-                <SignerOrderPill order={2} role="Manager" email={manager.email} />
-                <div className="flex-1 h-px bg-[#dde5f5]" />
-                <SignerOrderPill order={3} role="HR Officer" email={hrOfficer.email} />
+                {signerChain.map((s, idx) => (
+                  <div key={`pill-${s.role}-${idx}`} className="flex items-center gap-3">
+                    <SignerOrderPill
+                      order={idx + 1}
+                      role={s.role === "HOD" ? "HOD" : s.role === "MANAGER" ? "Manager" : "Employee"}
+                      email={s.email}
+                    />
+                    {idx < signerChain.length - 1 && <div className="w-8 h-px bg-[#dde5f5]" />}
+                  </div>
+                ))}
               </div>
               <p className="text-[10px] font-semibold uppercase tracking-[.07em] text-[#8a97b8] mb-3">Document will include</p>
               <div className="grid grid-cols-2 gap-y-1.5 gap-x-4">
@@ -388,22 +401,31 @@ export function SignoffsTab({
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                {[agreement.employee_signed_at, agreement.manager_signed_at, agreement.hr_signed_at].map((t, i) => (
+                {signerChain.map((s, i) => (
                   <div
                     key={i}
                     className={cn(
                       "w-2.5 h-2.5 rounded-full transition-colors",
-                      t ? "bg-[#059669]" : i === signaturesCollected ? "bg-[#d97706] animate-pulse" : "bg-[#dde5f5]"
+                      s.signedAt ? "bg-[#059669]" : i === signaturesCollected ? "bg-[#d97706] animate-pulse" : "bg-[#dde5f5]"
                     )}
                   />
                 ))}
               </div>
             </div>
-            <SignerRow order={1} role="Employee" name={employee.full_name} email={employee.email} signedAt={agreement.employee_signed_at} isCurrent={!agreement.employee_signed_at} />
-            <div className="h-px bg-[#dde5f5]" />
-            <SignerRow order={2} role="Manager" name={manager.full_name} email={manager.email} signedAt={agreement.manager_signed_at} isCurrent={!!agreement.employee_signed_at && !agreement.manager_signed_at} />
-            <div className="h-px bg-[#dde5f5]" />
-            <SignerRow order={3} role="HR Officer" name={hrOfficer.full_name} email={hrOfficer.email} signedAt={agreement.hr_signed_at} isCurrent={!!agreement.manager_signed_at && !agreement.hr_signed_at} />
+            {signerChain.map((s, idx) => (
+              <div key={`${s.role}-${idx}`}>
+                {idx > 0 && <div className="h-px bg-[#dde5f5]" />}
+                <SignerRow
+                  order={idx + 1}
+                  role={s.role === "HOD" ? "HOD" : s.role === "MANAGER" ? "Manager" : "Employee"}
+                  name={s.name}
+                  email={s.email}
+                  signedAt={s.signedAt}
+                  isCurrent={idx === currentSignerIndex}
+                  totalSigners={totalSigners}
+                />
+              </div>
+            ))}
           </div>
 
           {isCurrentSignersTurn && (
@@ -435,7 +457,7 @@ export function SignoffsTab({
                 FY2026_Appraisal_{employee.full_name.replace(/\s/g, "_")}.pdf
               </p>
               <p className="text-[10px] text-[#8a97b8] mt-0.5">
-                Generated {formatDate(agreement.created_at)} · {signaturesCollected} of 3 signatures collected
+                Generated {formatDate(agreement.created_at)} · {signaturesCollected} of {totalSigners} signatures collected
               </p>
             </div>
             <button
@@ -468,7 +490,7 @@ export function SignoffsTab({
             <div>
               <p className="font-['Sora'] text-[14px] font-bold text-[#065f46]">Sign-off complete</p>
               <p className="text-[11px] text-[#0d9488] mt-0.5">
-                All three signatures collected · {formatDate(agreement.hr_signed_at)} · Appraisal advancing to HOD Review
+                All signatures collected · {formatDate(agreement.hr_signed_at)} · Appraisal advancing to HOD Review
               </p>
             </div>
           </div>
@@ -477,16 +499,25 @@ export function SignoffsTab({
             <div className="px-5 py-3.5 bg-[#f8faff] border-b border-[#dde5f5] flex items-center justify-between">
               <p className="text-[13px] font-semibold text-[#0f1f3d]">Signatures collected</p>
               <div className="flex gap-1.5">
-                {[1, 2, 3].map((i) => (
+                {Array.from({ length: totalSigners }).map((_, i) => (
                   <div key={i} className="w-2.5 h-2.5 rounded-full bg-[#059669]" />
                 ))}
               </div>
             </div>
-            <SignerRow order={1} role="Employee" name={employee.full_name} email={employee.email} signedAt={agreement.employee_signed_at} isCurrent={false} />
-            <div className="h-px bg-[#dde5f5]" />
-            <SignerRow order={2} role="Manager" name={manager.full_name} email={manager.email} signedAt={agreement.manager_signed_at} isCurrent={false} />
-            <div className="h-px bg-[#dde5f5]" />
-            <SignerRow order={3} role="HR Officer" name={hrOfficer.full_name} email={hrOfficer.email} signedAt={agreement.hr_signed_at} isCurrent={false} />
+            {signerChain.map((s, idx) => (
+              <div key={`${s.role}-complete-${idx}`}>
+                {idx > 0 && <div className="h-px bg-[#dde5f5]" />}
+                <SignerRow
+                  order={idx + 1}
+                  role={s.role === "HOD" ? "HOD" : s.role === "MANAGER" ? "Manager" : "Employee"}
+                  name={s.name}
+                  email={s.email}
+                  signedAt={s.signedAt}
+                  isCurrent={false}
+                  totalSigners={totalSigners}
+                />
+              </div>
+            ))}
           </div>
 
           <div className="bg-white border border-[#dde5f5] rounded-[14px] overflow-hidden" style={{ boxShadow: "0 2px 12px rgba(15,31,61,0.07)" }}>

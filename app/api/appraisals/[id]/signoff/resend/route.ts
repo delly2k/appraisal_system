@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { sendReminder } from "@/lib/adobe-sign";
+import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -32,6 +33,7 @@ export async function POST(
     const isEmployee = appraisal.employee_id === currentUser.employee_id;
     const isManager = appraisal.manager_employee_id === currentUser.employee_id;
     const isHR = currentUser.roles?.some((r) => r === "hr" || r === "admin");
+    const isHOD = currentUser.roles?.some((r) => r === "gm" || r === "admin");
 
     const { data: agreement } = await supabase
       .from("appraisal_agreements")
@@ -44,10 +46,32 @@ export async function POST(
 
     if (!agreement) return NextResponse.json({ error: "No active agreement" }, { status: 404 });
 
+    const { data: managerUser } = await supabase
+      .from("app_users")
+      .select("role")
+      .eq("employee_id", appraisal.manager_employee_id)
+      .in("role", ["gm", "admin"])
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+
+    const hodEmployeeId = await resolveDepartmentHeadSystemUserId(appraisal.employee_id);
+    const managerActsAsFinalApprover =
+      appraisal.manager_employee_id === hodEmployeeId || !!managerUser;
+    const testOnlyEmployeeSigner = process.env.ALLOW_APPRAISAL_TEST_BYPASS === "true";
+    const managerIsInChain = !testOnlyEmployeeSigner && !managerActsAsFinalApprover;
+    const currentFinalSignerIsRequester =
+      (managerActsAsFinalApprover && isManager) ||
+      (!managerActsAsFinalApprover && currentUser.employee_id === hodEmployeeId);
+
     const isCurrentSigner =
       (isEmployee && !agreement.employee_signed_at) ||
-      (isManager && agreement.employee_signed_at && !agreement.manager_signed_at) ||
-      (isHR && agreement.manager_signed_at && !agreement.hr_signed_at);
+      (managerIsInChain && isManager && !!agreement.employee_signed_at && !agreement.manager_signed_at) ||
+      (!testOnlyEmployeeSigner &&
+        !!agreement.employee_signed_at &&
+        (managerIsInChain ? !!agreement.manager_signed_at : true) &&
+        !agreement.hr_signed_at &&
+        (currentFinalSignerIsRequester || isHOD || isHR));
 
     if (!isCurrentSigner) {
       return NextResponse.json({ error: "Only the current signer may resend the email" }, { status: 403 });

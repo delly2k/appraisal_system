@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { buildSummaryInput } from "@/lib/appraisal-summary-input";
 import { calcSummary, GRADE_BANDS } from "@/lib/summary-calc";
+import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -64,28 +65,60 @@ export async function GET(
       .select("full_name, email")
       .eq("employee_id", appraisal.manager_employee_id)
       .single();
-    const { data: hrUser } = await supabase
+    const { data: managerUser } = await supabase
       .from("app_users")
-      .select("employee_id, email, display_name")
-      .in("role", ["hr", "admin"])
+      .select("role")
+      .eq("employee_id", appraisal.manager_employee_id)
+      .in("role", ["gm", "admin"])
       .eq("is_active", true)
       .limit(1)
       .maybeSingle();
-    let hrName = hrUser?.display_name ?? hrUser?.email ?? "—";
-    if (hrUser?.employee_id) {
-      const { data: hrEmp } = await supabase
-        .from("employees")
-        .select("full_name")
-        .eq("employee_id", hrUser.employee_id)
-        .single();
-      if (hrEmp?.full_name) hrName = hrEmp.full_name;
-    }
+    const hodEmployeeId = await resolveDepartmentHeadSystemUserId(appraisal.employee_id);
+    const { data: hod } = hodEmployeeId
+      ? await supabase
+          .from("employees")
+          .select("employee_id, full_name, email")
+          .eq("employee_id", hodEmployeeId)
+          .single()
+      : { data: null };
 
     const signers = {
       employee: { full_name: emp?.full_name ?? "—", email: emp?.email ?? null },
       manager: { full_name: mgr?.full_name ?? "—", email: mgr?.email ?? null },
-      hrOfficer: { full_name: hrName, email: hrUser?.email ?? null },
+      hrOfficer: { full_name: hod?.full_name ?? "—", email: hod?.email ?? null },
     };
+
+    const testOnlyEmployeeSigner = process.env.ALLOW_APPRAISAL_TEST_BYPASS === "true";
+    const managerActsAsFinalApprover =
+      appraisal.manager_employee_id === hodEmployeeId || !!managerUser;
+    const managerIsInChain = !testOnlyEmployeeSigner && !managerActsAsFinalApprover;
+
+    const signerChain: { role: "EMPLOYEE" | "MANAGER" | "HOD"; name: string; email: string | null; signedAt: string | null }[] = [
+      {
+        role: "EMPLOYEE",
+        name: emp?.full_name ?? "—",
+        email: emp?.email ?? null,
+        signedAt: agreement?.employee_signed_at ?? null,
+      },
+    ];
+
+    if (!testOnlyEmployeeSigner) {
+      if (managerIsInChain) {
+        signerChain.push({
+          role: "MANAGER",
+          name: mgr?.full_name ?? "—",
+          email: mgr?.email ?? null,
+          signedAt: agreement?.manager_signed_at ?? null,
+        });
+      }
+
+      signerChain.push({
+        role: managerActsAsFinalApprover ? "MANAGER" : "HOD",
+        name: managerActsAsFinalApprover ? (mgr?.full_name ?? "—") : (hod?.full_name ?? "—"),
+        email: managerActsAsFinalApprover ? (mgr?.email ?? null) : (hod?.email ?? null),
+        signedAt: agreement?.hr_signed_at ?? null,
+      });
+    }
 
     let scores: { workplan: number; competency: number; overall: number; ratingLabel: string } = {
       workplan: 0,
@@ -113,6 +146,7 @@ export async function GET(
     return NextResponse.json({
       agreement: agreement ?? null,
       signers,
+      signerChain,
       scores,
     });
   } catch (err) {
