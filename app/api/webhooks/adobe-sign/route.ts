@@ -3,19 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { downloadSignedPDF } from "@/lib/adobe-sign";
 import { sendNotification, type SupabaseLike } from "@/lib/notifications";
 
-// Adobe Sign webhook verification expects client ID echoed back.
-export async function GET(request: Request) {
-  const clientId = request.headers.get("X-AdobeSign-ClientId");
-  return new Response(
-    JSON.stringify({ xAdobeSignClientId: clientId }),
-    {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "X-AdobeSign-ClientId": clientId || "",
-      },
-    }
-  );
+// Adobe Sign webhook verification expects client ID echoed in response header.
+export async function GET(req: NextRequest) {
+  const clientId = req.headers.get("x-adobesign-clientid");
+  const response = new NextResponse("Webhook received", { status: 200 });
+  response.headers.set("X-AdobeSign-ClientId", clientId ?? "");
+  return response;
 }
 
 function getSupabaseAdmin() {
