@@ -227,26 +227,43 @@ export async function buildAppraisalPDFHTML(appraisalId: string): Promise<string
 export async function generateAppraisalPDF(appraisalId: string): Promise<Buffer> {
   const html = await buildAppraisalPDFHTML(appraisalId);
 
-  const puppeteer = await import("puppeteer");
-  const browser = await puppeteer.default.launch({
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    headless: true,
-  });
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "networkidle0" });
+  const isVercelRuntime = process.env.VERCEL === "1";
+  const browser = isVercelRuntime
+    ? await (async () => {
+        const chromium = (await import("@sparticuz/chromium")).default;
+        const puppeteerCore = await import("puppeteer-core");
+        const executablePath = await chromium.executablePath();
+        return puppeteerCore.default.launch({
+          args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox"],
+          executablePath,
+          headless: true,
+        });
+      })()
+    : await (async () => {
+        const puppeteer = await import("puppeteer");
+        return puppeteer.default.launch({
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          headless: true,
+        });
+      })();
 
-  const headerHtml = `<div style="width:100%;font-size:7pt;color:#666;padding:0 15mm;border-bottom:1px solid #dde5f5;"><span style="color:#0f1f3d;font-weight:bold">DEVELOPMENT BANK OF JAMAICA — ANNUAL PERFORMANCE APPRAISAL</span></div>`;
-  const footerHtml = `<div style="width:100%;font-size:7pt;color:#999;padding:0 15mm;display:flex;justify-content:space-between;"><span>CONFIDENTIAL</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
 
-  const pdf = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" },
-    displayHeaderFooter: true,
-    headerTemplate: headerHtml,
-    footerTemplate: footerHtml,
-  });
-  await browser.close();
+    const headerHtml = `<div style="width:100%;font-size:7pt;color:#666;padding:0 15mm;border-bottom:1px solid #dde5f5;"><span style="color:#0f1f3d;font-weight:bold">DEVELOPMENT BANK OF JAMAICA — ANNUAL PERFORMANCE APPRAISAL</span></div>`;
+    const footerHtml = `<div style="width:100%;font-size:7pt;color:#999;padding:0 15mm;display:flex;justify-content:space-between;"><span>CONFIDENTIAL</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
-  return Buffer.from(pdf);
+    const pdf = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" },
+      displayHeaderFooter: true,
+      headerTemplate: headerHtml,
+      footerTemplate: footerHtml,
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
 }
