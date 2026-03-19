@@ -106,6 +106,33 @@ function buildWorkplanRows(items: WorkplanItemRow[]): string {
     .join("\n");
 }
 
+const SECTION_F_LABELS: Record<string, string> = {
+  workplan: "Section A — Workplan",
+  cc: "Section B — Core",
+  technical: "Section C — Technical",
+  prod: "Section D — Productivity",
+  leadership: "Section E — Leadership",
+};
+
+const SECTION_F_ORDER: (keyof typeof SECTION_F_LABELS)[] = ["workplan", "cc", "technical", "prod", "leadership"];
+
+function buildSectionFTableRows(
+  components: { key: string; name: string; weight: number; points: number }[],
+  overallScore: number | string
+): string {
+  const byKey = Object.fromEntries(components.map((c) => [c.key, c]));
+  const rows = SECTION_F_ORDER.filter((key) => byKey[key]).map((key) => {
+    const c = byKey[key];
+    const label = SECTION_F_LABELS[key] ?? c.name;
+    const isWorkplan = key === "workplan";
+    return `<tr><td>${escapeHtml(label)}</td><td style="text-align:center">${c.weight}%</td><td style="text-align:center${isWorkplan ? "; font-weight:bold" : ""}">${c.points}</td></tr>`;
+  });
+  rows.push(
+    `<tr style="background:#0f1f3d; color:white; font-weight:bold;"><td>OVERALL SCORE</td><td style="text-align:center">100%</td><td style="text-align:center; color:#c9a84c;">${escapeHtml(String(overallScore))}%</td></tr>`
+  );
+  return rows.join("\n");
+}
+
 function buildFactorRows(items: FactorRatingRow[]): string {
   if (!items.length) return "<tr><td colspan='6'>—</td></tr>";
   return items
@@ -169,6 +196,7 @@ export async function buildAppraisalPDFHTML(appraisalId: string): Promise<string
     .replace(/\{\{TECHNICAL_SCORE\}\}/g, String(data.scores.technicalScore))
     .replace(/\{\{PRODUCTIVITY_SCORE\}\}/g, String(data.scores.productivityScore))
     .replace(/\{\{LEADERSHIP_SCORE\}\}/g, String(data.scores.leadershipScore))
+    .replace(/\{\{SECTION_F_TABLE_ROWS\}\}/g, buildSectionFTableRows(data.summaryComponents, data.scores.overall))
     .replace(/\{\{HR_RECOMMENDATION\}\}/g, escapeHtml(data.hrRecommendation.recommendation))
     .replace(/\{\{HR_COMMENTS\}\}/g, escapeHtml(data.hrRecommendation.comments));
 

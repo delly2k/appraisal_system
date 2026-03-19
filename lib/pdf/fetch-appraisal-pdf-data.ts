@@ -62,6 +62,8 @@ export interface AppraisalPDFData {
     workplanTotal: number | string;
     selfWorkplanTotal: number | string;
   };
+  /** Summary components (key, name, weight, points) for Section F table; order matches calcSummary. */
+  summaryComponents: { key: string; name: string; weight: number; points: number }[];
   hrRecommendation: { recommendation: string; comments: string };
 }
 
@@ -324,6 +326,12 @@ export async function fetchAppraisalPDFData(
       workplanTotal: workplanTotal > 0 ? workplanTotal.toFixed(1) : "—",
       selfWorkplanTotal: selfWorkplanTotal > 0 ? selfWorkplanTotal.toFixed(1) : "—",
     },
+    summaryComponents: (summaryResult?.components ?? []).map((c) => ({
+      key: c.key,
+      name: c.name,
+      weight: c.weight,
+      points: c.points,
+    })),
     hrRecommendation: {
       recommendation: recLabels.length ? recLabels.join(", ") : "—",
       comments: (hrRec?.other_notes as string) ?? "",
