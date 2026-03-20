@@ -170,14 +170,38 @@ export function SignoffsTab({
     void refetchStatus();
   }, [refetchStatus]);
 
+  const pollAdobeStatus = useCallback(async () => {
+    setSyncError(null);
+    setIsSyncingAdobe(true);
+    try {
+      const res = await fetch(`/api/appraisals/${appraisalId}/check-adobe-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncError(typeof data.error === "string" ? data.error : "Sync failed");
+        return;
+      }
+      await refetchStatus();
+    } catch (err) {
+      console.error("[SignoffsTab] Poll error:", err);
+      setSyncError("Sync failed");
+    } finally {
+      setIsSyncingAdobe(false);
+    }
+  }, [appraisalId, refetchStatus]);
+
   useEffect(() => {
     const agreementStatus = statusData?.agreement?.status;
     if (agreementStatus !== "OUT_FOR_SIGNATURE") return;
+    void pollAdobeStatus();
     const id = setInterval(() => {
-      void refetchStatus();
-    }, 10000);
+      void pollAdobeStatus();
+    }, 15000);
     return () => clearInterval(id);
-  }, [statusData?.agreement?.status, refetchStatus]);
+  }, [statusData?.agreement?.status, pollAdobeStatus]);
 
   const agreement = (statusData?.agreement ?? appraisal.agreement) as AppraisalAgreement | undefined | null;
   const employee = statusData?.signers?.employee ?? { full_name: appraisal.employeeName, email: appraisal.employeeEmail ?? null };
@@ -273,27 +297,6 @@ export function SignoffsTab({
   };
 
   const canSyncWithAdobe = isHR || isEmployee || isAppraisalManager;
-
-  const handleSyncAdobeSign = async () => {
-    setSyncError(null);
-    setIsSyncingAdobe(true);
-    try {
-      const res = await fetch(`/api/appraisals/${appraisalId}/check-adobe-status`, {
-        method: "POST",
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSyncError(typeof data.error === "string" ? data.error : "Sync failed");
-        return;
-      }
-      await refetchStatus();
-    } catch {
-      setSyncError("Sync failed");
-    } finally {
-      setIsSyncingAdobe(false);
-    }
-  };
 
   const hodSignoff = signoffs.find((s) => s.role === "HOD" && s.stage === "HOD_REVIEW");
   const canHodSign = status === "HOD_REVIEW" && isHOD && !hodSignoff;
@@ -480,6 +483,12 @@ export function SignoffsTab({
                 />
               </div>
             ))}
+            {agreement.status === "OUT_FOR_SIGNATURE" && (
+              <p className="text-xs text-[#8a97b8] flex items-center gap-1.5 mt-2 px-5 pb-4">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0d9488] animate-pulse" />
+                Checking for updates every 15 seconds
+              </p>
+            )}
           </div>
 
           {isCurrentSignersTurn && (
@@ -530,7 +539,7 @@ export function SignoffsTab({
                 {canSyncWithAdobe && (
                   <button
                     type="button"
-                    onClick={() => void handleSyncAdobeSign()}
+                    onClick={() => void pollAdobeStatus()}
                     disabled={isSyncingAdobe}
                     className="flex items-center gap-1.5 text-[11px] text-[#8a97b8] hover:text-[#0f1f3d] transition-colors disabled:opacity-50"
                   >
