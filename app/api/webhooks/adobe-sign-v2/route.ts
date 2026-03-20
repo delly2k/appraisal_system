@@ -76,13 +76,27 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
+    console.log("[webhook] Failed to parse JSON body; exiting");
     return NextResponse.json({ ok: true });
   }
 
+  const eventObject = body.event as { type?: string; event?: string } | undefined;
+  const agreementObject = body.agreement as { id?: string; status?: string } | undefined;
+  console.log("[webhook] Raw body received");
+  console.log("[webhook] Event type:", eventObject?.type ?? eventObject?.event ?? "UNKNOWN");
+  console.log("[webhook] Agreement ID:", agreementObject?.id ?? "NONE");
+  console.log("[webhook] Agreement status:", agreementObject?.status ?? "NONE");
+  console.log("[webhook] Full payload:", JSON.stringify(body, null, 2));
+
   const event = extractWebhookEvent(body);
   const agreementId = extractAgreementId(body);
+  const eventType = event ?? "UNKNOWN";
+  console.log("[webhook] Checking event type match:", eventType);
 
-  if (!agreementId) return NextResponse.json({ ok: true });
+  if (!agreementId) {
+    console.log("[webhook] No agreement ID found; exiting");
+    return NextResponse.json({ ok: true });
+  }
 
   const { data: agreement, error: aggErr } = await supabase
     .from("appraisal_agreements")
@@ -90,7 +104,13 @@ export async function POST(req: NextRequest) {
     .eq("adobe_agreement_id", agreementId)
     .maybeSingle();
 
-  if (aggErr || !agreement) return NextResponse.json({ ok: true });
+  if (aggErr || !agreement) {
+    console.log("[webhook] Agreement row not found in DB; exiting", {
+      agreementId,
+      aggErr: aggErr?.message ?? null,
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   const { data: appraisal, error: appErr } = await supabase
     .from("appraisals")
@@ -98,7 +118,13 @@ export async function POST(req: NextRequest) {
     .eq("id", agreement.appraisal_id)
     .single();
 
-  if (appErr || !appraisal) return NextResponse.json({ ok: true });
+  if (appErr || !appraisal) {
+    console.log("[webhook] Appraisal row not found in DB; exiting", {
+      appraisalId: agreement.appraisal_id,
+      appErr: appErr?.message ?? null,
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   const { data: emp } = await supabase
     .from("employees")
@@ -147,6 +173,7 @@ export async function POST(req: NextRequest) {
 
   switch (normalizedEvent) {
     case "AGREEMENT_ACTION_COMPLETED": {
+      console.log("[webhook] Checking event type match:", eventType);
       const updates: Record<string, string> = { updated_at: new Date().toISOString() };
       const now = new Date().toISOString();
 
@@ -195,6 +222,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "AGREEMENT_COMPLETED": {
+      console.log("[webhook] Checking event type match:", eventType);
       const signedPdfBuffer = await downloadSignedPDF(agreementId);
       const signedPath = `${agreement.appraisal_id}/signed-${Date.now()}.pdf`;
 
@@ -247,6 +275,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "AGREEMENT_DECLINED": {
+      console.log("[webhook] Checking event type match:", eventType);
       const declinerEmail = extractParticipantEmail(body) ?? (actionInfo?.participantEmail as string) ?? "";
       const declineReason = (actionInfo?.comment as string) ?? "";
 
@@ -281,6 +310,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "AGREEMENT_EXPIRED": {
+      console.log("[webhook] Checking event type match:", eventType);
       await supabase
         .from("appraisal_agreements")
         .update({ status: "EXPIRED", updated_at: new Date().toISOString() })
@@ -306,6 +336,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "AGREEMENT_RECALLED": {
+      console.log("[webhook] Checking event type match:", eventType);
       await supabase
         .from("appraisal_agreements")
         .update({ status: "CANCELLED", updated_at: new Date().toISOString() })
@@ -314,6 +345,7 @@ export async function POST(req: NextRequest) {
     }
 
     default:
+      console.log("[webhook] No matching event type handler for:", eventType);
       break;
   }
 
