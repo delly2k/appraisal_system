@@ -82,6 +82,17 @@ export function buildAppraisalHTML(data: AppraisalPDFData, logoDataUrl: string |
     .signature-block { margin-top: 24px; }
     .signature-line { margin: 24px 0 8px 0; border-bottom: 1px solid #0f1f3d; width: 60%; }
     .adobe-anchors { display: none; }
+    .adobe-signature-field {
+      display: inline-block;
+      box-sizing: border-box;
+      width: 70mm;
+      min-height: 20mm;
+      vertical-align: top;
+      color: white;
+      font-size: 8pt;
+      line-height: 1.2;
+      overflow: hidden;
+    }
   </style>
 </head>
 <body>
@@ -150,13 +161,13 @@ export function buildAppraisalHTML(data: AppraisalPDFData, logoDataUrl: string |
     <h2>Signatures</h2>
     <p>Employee:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{BigSig_es_:signer1:signature:dimension(width=70mm, height=20mm)}}</span>
+    <span class="adobe-signature-field">{{BigSig_es_:signer1:signature:dimension(width=70mm, height=20mm)}}</span>
     <p>Manager:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{BigSig_es_:signer2:signature:dimension(width=70mm, height=20mm)}}</span>
+    <span class="adobe-signature-field">{{BigSig_es_:signer2:signature:dimension(width=70mm, height=20mm)}}</span>
     <p>HR Officer:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{BigSig_es_:signer3:signature:dimension(width=70mm, height=20mm)}}</span>
+    <span class="adobe-signature-field">{{BigSig_es_:signer3:signature:dimension(width=70mm, height=20mm)}}</span>
   </div>
 </body>
 </html>`;
