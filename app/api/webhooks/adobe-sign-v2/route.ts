@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   const eventType = body?.event as string;
   console.log("[webhook] Raw body received");
   console.log("[webhook] Event type:", eventType);
-  console.log("[webhook] Adobe agreement ID:", body?.agreement?.id);
+  console.log("[webhook] Adobe agreement ID:", agreementObject?.id);
   console.log("[webhook] Participant email:", body?.participantUserEmail);
   console.log("[webhook] Agreement ID:", agreementObject?.id ?? "NONE");
   console.log("[webhook] Agreement status:", agreementObject?.status ?? "NONE");
