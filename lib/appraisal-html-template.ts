@@ -150,13 +150,13 @@ export function buildAppraisalHTML(data: AppraisalPDFData, logoDataUrl: string |
     <h2>Signatures</h2>
     <p>Employee:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{sig_es_:signer1:signature}}</span>
+    <span class="adobe-anchors">{{BigSig_es_:signer1:signature:dimension(width=70mm, height=20mm)}}</span>
     <p>Manager:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{sig_es_:signer2:signature}}</span>
+    <span class="adobe-anchors">{{BigSig_es_:signer2:signature:dimension(width=70mm, height=20mm)}}</span>
     <p>HR Officer:</p>
     <div class="signature-line"></div>
-    <span class="adobe-anchors">{{sig_es_:signer3:signature}}</span>
+    <span class="adobe-anchors">{{BigSig_es_:signer3:signature:dimension(width=70mm, height=20mm)}}</span>
   </div>
 </body>
 </html>`;
