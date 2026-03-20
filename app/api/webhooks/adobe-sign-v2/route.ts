@@ -80,18 +80,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const eventObject = body.event as { type?: string; event?: string } | undefined;
   const agreementObject = body.agreement as { id?: string; status?: string } | undefined;
+  const eventType = body?.event as string;
   console.log("[webhook] Raw body received");
-  console.log("[webhook] Event type:", eventObject?.type ?? eventObject?.event ?? "UNKNOWN");
+  console.log("[webhook] Event type:", eventType);
+  console.log("[webhook] Adobe agreement ID:", body?.agreement?.id);
+  console.log("[webhook] Participant email:", body?.participantUserEmail);
   console.log("[webhook] Agreement ID:", agreementObject?.id ?? "NONE");
   console.log("[webhook] Agreement status:", agreementObject?.status ?? "NONE");
   console.log("[webhook] Full payload:", JSON.stringify(body, null, 2));
 
-  const event = extractWebhookEvent(body);
-  const agreementId = extractAgreementId(body);
-  const eventType = event ?? "UNKNOWN";
-  console.log("[webhook] Checking event type match:", eventType);
+  const agreementId = agreementObject?.id;
+  console.log("[webhook] Checking event type match:", eventType ?? "UNKNOWN");
 
   if (!agreementId) {
     console.log("[webhook] No agreement ID found; exiting");
@@ -164,113 +164,119 @@ export async function POST(req: NextRequest) {
     : (managerActsAsFinalApprover ? appraisal.manager_employee_id : hodEmployeeId);
 
   const actionInfo = body.actionInfo as { participantEmail?: string; comment?: string } | undefined;
-  const signerEmail = extractParticipantEmail(body);
+  const signerEmail = (body?.participantUserEmail as string | undefined) ?? extractParticipantEmail(body);
 
-  const normalizedEvent =
-    event === "AGREEMENT_WORKFLOW_COMPLETED" || event === "WORKFLOW_COMPLETED"
-      ? "AGREEMENT_COMPLETED"
-      : event;
+  const runCompletedFlow = async () => {
+    const signedPdfBuffer = await downloadSignedPDF(agreementId);
+    const signedPath = `${agreement.appraisal_id}/signed-${Date.now()}.pdf`;
 
-  switch (normalizedEvent) {
+    await supabase.storage
+      .from("appraisal-pdfs")
+      .upload(signedPath, signedPdfBuffer, { contentType: "application/pdf" });
+
+    const { data: urlData } = await supabase.storage
+      .from("appraisal-pdfs")
+      .createSignedUrl(signedPath, 60 * 60 * 24 * 365);
+
+    const completedAt = new Date().toISOString();
+    const completionUpdate: Record<string, string | null> = {
+      status: "COMPLETED",
+      signed_pdf_url: urlData?.signedUrl ?? null,
+      signed_pdf_path: signedPath,
+      employee_signed_at: agreement.employee_signed_at ?? completedAt,
+      manager_signed_at: agreement.manager_signed_at ?? completedAt,
+      hr_signed_at: agreement.hr_signed_at ?? completedAt,
+      updated_at: completedAt,
+    };
+
+    await supabase.from("appraisal_agreements").update(completionUpdate).eq("id", agreement.id);
+
+    await supabase
+      .from("appraisals")
+      .update({ status: "HOD_REVIEW" })
+      .eq("id", agreement.appraisal_id);
+
+    const recipients = Array.from(
+      new Set(
+        [appraisal.employee_id, managerIsInChain ? appraisal.manager_employee_id : null, finalSignerEmployeeId]
+          .filter((v): v is string => Boolean(v))
+      )
+    );
+
+    for (const recipientEmployeeId of recipients) {
+      await sendNotification(
+        {
+          recipientEmployeeId,
+          type: "SIGNOFF_COMPLETE",
+          message: `Sign-off is complete for ${emp?.full_name ?? "Employee"}'s FY 2026 appraisal. The appraisal is now moving to HOD Review.`,
+          appraisalId: agreement.appraisal_id,
+        },
+        supabase as unknown as SupabaseLike
+      );
+    }
+  };
+
+  switch (eventType) {
     case "AGREEMENT_ACTION_COMPLETED": {
       console.log("[webhook] Checking event type match:", eventType);
-      const updates: Record<string, string> = { updated_at: new Date().toISOString() };
-      const now = new Date().toISOString();
-
-      if (emailsMatch(signerEmail, emp?.email)) {
-        updates.employee_signed_at = now;
-        if (managerIsInChain && mgr?.employee_id) {
-          await sendNotification(
-            {
-              recipientEmployeeId: mgr.employee_id,
-              type: "SIGNOFF_ACTION_REQUIRED",
-              message: `${emp?.full_name ?? "Employee"} has signed their appraisal. Check your email from Adobe Sign to add your signature.`,
-              appraisalId: agreement.appraisal_id,
-            },
-            supabase as unknown as SupabaseLike
-          );
-        } else if (!testOnlyEmployeeSigner && !managerActsAsFinalApprover && hod?.employee_id) {
-          await sendNotification(
-            {
-              recipientEmployeeId: hod.employee_id,
-              type: "SIGNOFF_ACTION_REQUIRED",
-              message: `${emp?.full_name ?? "Employee"} has signed their appraisal. Check your email from Adobe Sign to complete sign-off.`,
-              appraisalId: agreement.appraisal_id,
-            },
-            supabase as unknown as SupabaseLike
-          );
-        }
-      } else if (managerIsInChain && emailsMatch(signerEmail, mgr?.email)) {
-        updates.manager_signed_at = now;
-        if (hod?.employee_id) {
-          await sendNotification(
-            {
-              recipientEmployeeId: hod.employee_id,
-              type: "SIGNOFF_ACTION_REQUIRED",
-              message: `Manager has signed the appraisal for ${emp?.full_name ?? "Employee"}. Check your email from Adobe Sign to complete sign-off.`,
-              appraisalId: agreement.appraisal_id,
-            },
-            supabase as unknown as SupabaseLike
-          );
-        }
-      } else {
-        updates.hr_signed_at = now;
+      const agreementStatus = String(agreementObject?.status ?? "").toUpperCase();
+      if (agreementStatus === "SIGNED" || agreementStatus === "COMPLETED") {
+        await runCompletedFlow();
+        break;
       }
 
-      await supabase.from("appraisal_agreements").update(updates).eq("id", agreement.id);
+      if (agreementStatus === "OUT_FOR_SIGNATURE") {
+        const updates: Record<string, string> = { updated_at: new Date().toISOString() };
+        const now = new Date().toISOString();
+
+        if (emailsMatch(signerEmail, emp?.email)) {
+          updates.employee_signed_at = now;
+          if (managerIsInChain && mgr?.employee_id) {
+            await sendNotification(
+              {
+                recipientEmployeeId: mgr.employee_id,
+                type: "SIGNOFF_ACTION_REQUIRED",
+                message: `${emp?.full_name ?? "Employee"} has signed their appraisal. Check your email from Adobe Sign to add your signature.`,
+                appraisalId: agreement.appraisal_id,
+              },
+              supabase as unknown as SupabaseLike
+            );
+          } else if (!testOnlyEmployeeSigner && !managerActsAsFinalApprover && hod?.employee_id) {
+            await sendNotification(
+              {
+                recipientEmployeeId: hod.employee_id,
+                type: "SIGNOFF_ACTION_REQUIRED",
+                message: `${emp?.full_name ?? "Employee"} has signed their appraisal. Check your email from Adobe Sign to complete sign-off.`,
+                appraisalId: agreement.appraisal_id,
+              },
+              supabase as unknown as SupabaseLike
+            );
+          }
+        } else if (emailsMatch(signerEmail, mgr?.email)) {
+          updates.manager_signed_at = now;
+          if (hod?.employee_id) {
+            await sendNotification(
+              {
+                recipientEmployeeId: hod.employee_id,
+                type: "SIGNOFF_ACTION_REQUIRED",
+                message: `Manager has signed the appraisal for ${emp?.full_name ?? "Employee"}. Check your email from Adobe Sign to complete sign-off.`,
+                appraisalId: agreement.appraisal_id,
+              },
+              supabase as unknown as SupabaseLike
+            );
+          }
+        } else if (emailsMatch(signerEmail, hod?.email)) {
+          updates.hr_signed_at = now;
+        }
+
+        await supabase.from("appraisal_agreements").update(updates).eq("id", agreement.id);
+      }
       break;
     }
 
     case "AGREEMENT_COMPLETED": {
       console.log("[webhook] Checking event type match:", eventType);
-      const signedPdfBuffer = await downloadSignedPDF(agreementId);
-      const signedPath = `${agreement.appraisal_id}/signed-${Date.now()}.pdf`;
-
-      await supabase.storage
-        .from("appraisal-pdfs")
-        .upload(signedPath, signedPdfBuffer, { contentType: "application/pdf" });
-
-      const { data: urlData } = await supabase.storage
-        .from("appraisal-pdfs")
-        .createSignedUrl(signedPath, 60 * 60 * 24 * 365);
-
-      const completedAt = new Date().toISOString();
-      const completionUpdate: Record<string, string | null> = {
-        status: "SIGNED",
-        signed_pdf_url: urlData?.signedUrl ?? null,
-        signed_pdf_path: signedPath,
-        hr_signed_at: completedAt,
-        updated_at: completedAt,
-      };
-      if (testOnlyEmployeeSigner && !agreement.employee_signed_at) {
-        completionUpdate.employee_signed_at = completedAt;
-      }
-
-      await supabase.from("appraisal_agreements").update(completionUpdate).eq("id", agreement.id);
-
-      await supabase
-        .from("appraisals")
-        .update({ status: "HOD_REVIEW" })
-        .eq("id", agreement.appraisal_id);
-
-      const recipients = Array.from(
-        new Set(
-          [appraisal.employee_id, managerIsInChain ? appraisal.manager_employee_id : null, finalSignerEmployeeId]
-            .filter((v): v is string => Boolean(v))
-        )
-      );
-
-      for (const recipientEmployeeId of recipients) {
-        await sendNotification(
-          {
-            recipientEmployeeId,
-            type: "SIGNOFF_COMPLETE",
-            message: `Sign-off is complete for ${emp?.full_name ?? "Employee"}'s FY 2026 appraisal. The appraisal is now moving to HOD Review.`,
-            appraisalId: agreement.appraisal_id,
-          },
-          supabase as unknown as SupabaseLike
-        );
-      }
+      await runCompletedFlow();
       break;
     }
 
