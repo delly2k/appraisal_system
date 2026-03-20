@@ -100,15 +100,6 @@ export function CompletionBarWrapper({
         const data = await res.json();
         if (res.ok) window.location.reload();
         else alert(data.error || "Failed");
-      } else if (status === "HOD_REVIEW") {
-        const res = await fetch(`/api/appraisals/${appraisalId}/signoff`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "HOD", stage: "HOD_REVIEW" }),
-        });
-        const data = await res.json();
-        if (res.ok) window.location.reload();
-        else alert(data.error || "Failed");
       } else if (status === "HR_REVIEW") {
         const res = await fetch(`/api/appraisals/${appraisalId}/complete`, { method: "POST" });
         const data = await res.json();

@@ -298,26 +298,6 @@ export function SignoffsTab({
 
   const canSyncWithAdobe = isHR || isEmployee || isAppraisalManager;
 
-  const hodSignoff = signoffs.find((s) => s.role === "HOD" && s.stage === "HOD_REVIEW");
-  const canHodSign = status === "HOD_REVIEW" && isHOD && !hodSignoff;
-  const [hodComment, setHodComment] = useState("");
-  const [hodSignoffSubmitting, setHodSignoffSubmitting] = useState(false);
-  const handleHodSignoff = async () => {
-    setHodSignoffSubmitting(true);
-    try {
-      const res = await fetch(`/api/appraisals/${appraisalId}/signoff`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "HOD", stage: "HOD_REVIEW", comment: hodComment || undefined }),
-      });
-      const data = await res.json();
-      if (res.ok) window.location.reload();
-      else alert(data.error ?? "Failed to sign off");
-    } finally {
-      setHodSignoffSubmitting(false);
-    }
-  };
-
   const generatePdfButton = uiState === "READY_TO_SUBMIT" && (isAppraisalManager || isHR) ? (
     <button
       type="button"
@@ -672,46 +652,6 @@ export function SignoffsTab({
           </p>
         </div>
       )}
-
-      {/* Section F — HOD Sign-off (unchanged) */}
-      <div className={cn("border rounded-[14px] overflow-hidden", hodSignoff ? "border-emerald-200" : "border-[#dde5f5]")} style={{ boxShadow: "0 2px 12px rgba(15,31,61,0.07)" }}>
-        <div className="flex items-center justify-between px-5 py-3.5 bg-[#f8faff] border-b border-[#dde5f5]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-[8px] bg-[#fdf2f8] border border-[#fbcfe8] flex items-center justify-center">
-              <Check className="w-4 h-4 text-pink-600" />
-            </div>
-            <div>
-              <p className="font-['Sora'] text-[13px] font-bold">Section F — HOD / Reviewing Manager</p>
-              <p className="text-[11px] text-[#8a97b8]">{hodSignoff ? `Signed ${formatDate(hodSignoff.signed_at)}` : "Awaiting HOD signature"}</p>
-            </div>
-          </div>
-          {hodSignoff && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
-              <Check className="w-3 h-3" /> Signed
-            </span>
-          )}
-        </div>
-        <div className="p-5 flex flex-col gap-4">
-          <textarea
-            value={hodComment}
-            onChange={(e) => setHodComment(e.target.value)}
-            disabled={!canHodSign}
-            placeholder="Reviewing manager's overall comments..."
-            className="w-full border border-[#dde5f5] rounded-[8px] p-3 text-[13px] min-h-[100px] resize-none focus:outline-none focus:border-pink-400 disabled:bg-[#f8faff] disabled:text-[#8a97b8]"
-          />
-          {canHodSign && (
-            <button
-              type="button"
-              onClick={handleHodSignoff}
-              disabled={hodSignoffSubmitting}
-              className="self-end flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#0f1f3d] text-white text-[12px] font-semibold disabled:opacity-70"
-            >
-              <Check className="w-3.5 h-3.5" />
-              HOD Sign-off
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Cancel modal */}
       {showCancelModal && (

@@ -449,7 +449,7 @@ export function WorkplanSection({
   const canApproveWorkplan = false;
 
   // Show actual results from SELF_ASSESSMENT onward
-  const showActualResults = ["SELF_ASSESSMENT", "SUBMITTED", "MANAGER_REVIEW", "PENDING_SIGNOFF", "HOD_REVIEW", "HR_REVIEW", "COMPLETE"].includes(status);
+  const showActualResults = ["SELF_ASSESSMENT", "SUBMITTED", "MANAGER_REVIEW", "PENDING_SIGNOFF", "HR_REVIEW", "COMPLETE"].includes(status);
   const showTargetColumn = canEditPlanningFields || showActualResults || status === "IN_PROGRESS";
 
   const isPlanningPhase = status === "DRAFT" || status === "PENDING_APPROVAL";

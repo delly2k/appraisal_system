@@ -13,7 +13,8 @@ export const VALID_TRANSITIONS: Record<AppraisalStatus, AppraisalStatus[]> = {
   SELF_ASSESSMENT: ["MANAGER_REVIEW"],
   SUBMITTED: ["MANAGER_REVIEW"],
   MANAGER_REVIEW: ["SELF_ASSESSMENT"],
-  PENDING_SIGNOFF: ["HOD_REVIEW", "MANAGER_REVIEW"],
+  PENDING_SIGNOFF: ["HR_REVIEW", "MANAGER_REVIEW"],
+  // deprecated - retained for legacy records only
   HOD_REVIEW: ["HR_REVIEW"],
   HR_REVIEW: ["COMPLETE"],
   COMPLETE: [],

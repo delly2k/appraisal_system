@@ -12,6 +12,7 @@ export const APPRAISAL_STATUS = [
   "SUBMITTED",
   "MANAGER_REVIEW",
   "PENDING_SIGNOFF",
+  // deprecated - skipped in workflow
   "HOD_REVIEW",
   "HR_REVIEW",
   "COMPLETE",

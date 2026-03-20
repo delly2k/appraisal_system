@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
 
     await supabase
       .from("appraisals")
-      .update({ status: "HOD_REVIEW" })
+      .update({ status: "HR_REVIEW" })
       .eq("id", agreement.appraisal_id);
 
     const recipients = Array.from(
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
         {
           recipientEmployeeId,
           type: "SIGNOFF_COMPLETE",
-          message: `Sign-off is complete for ${emp?.full_name ?? "Employee"}'s FY 2026 appraisal. The appraisal is now moving to HOD Review.`,
+            message: `Sign-off is complete for ${emp?.full_name ?? "Employee"}'s FY 2026 appraisal. The appraisal is now moving to HR Review.`,
           appraisalId: agreement.appraisal_id,
         },
         supabase as unknown as SupabaseLike

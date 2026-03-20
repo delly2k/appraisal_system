@@ -262,7 +262,7 @@ export async function POST(
       await supabase.from("appraisal_agreements").update(completionUpdate).eq("id", agreementRow.id);
 
       if (appraisal.status === "PENDING_SIGNOFF") {
-        await supabase.from("appraisals").update({ status: "HOD_REVIEW" }).eq("id", appraisalId);
+        await supabase.from("appraisals").update({ status: "HR_REVIEW" }).eq("id", appraisalId);
       }
     } else if (adobeStatus === "OUT_FOR_SIGNATURE" || adobeStatus.includes("SIGNATURE")) {
       const partial = applyParticipantSignatures(adobe, {

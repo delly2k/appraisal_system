@@ -575,9 +575,9 @@ export function AppraisalTabs({
         { id: "technical", label: "Technical", icon: <WrenchIcon /> },
         { id: "productivity", label: "Productivity", icon: <TrendingUpIcon /> },
         ...(showLeadership ? [{ id: "leadership" as const, label: "Leadership", icon: <UsersIcon /> }] : []),
-        ...((isHR || isAppraisalManager) && ["MANAGER_REVIEW", "PENDING_SIGNOFF", "HOD_REVIEW", "HR_REVIEW", "COMPLETE"].includes(status) ? [{ id: "hractions" as const, label: "HR Actions", icon: <HRActionsIcon /> }] : []),
+        ...((isHR || isAppraisalManager) && ["MANAGER_REVIEW", "PENDING_SIGNOFF", "HR_REVIEW", "COMPLETE"].includes(status) ? [{ id: "hractions" as const, label: "HR Actions", icon: <HRActionsIcon /> }] : []),
         { id: "summary", label: "Summary", icon: <FileTextIcon /> },
-        ...(((status === "MANAGER_REVIEW" && (isAppraisalManager || isHR)) || status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE") ? [{ id: "signoffs" as const, label: "Sign-offs", icon: <PenLineIcon /> }] : []),
+        ...(((status === "MANAGER_REVIEW" && (isAppraisalManager || isHR)) || status === "PENDING_SIGNOFF" || status === "HR_REVIEW" || status === "COMPLETE") ? [{ id: "signoffs" as const, label: "Sign-offs", icon: <PenLineIcon /> }] : []),
         { id: "audit", label: "Audit trail", icon: <HistoryIcon /> },
       ];
 
@@ -715,8 +715,7 @@ export function AppraisalTabs({
   const signedEmployee = !!agreement?.employee_signed_at;
   const signedManager = !!agreement?.manager_signed_at;
   const signedHR = !!agreement?.hr_signed_at;
-  const signedHOD = signoffs.some((s) => s.role === "HOD" && s.stage === "HOD_REVIEW");
-  const allSignoffsComplete = agreement?.status === "SIGNED" ? signedHOD : false;
+  const allSignoffsComplete = agreement?.status === "SIGNED";
   const managerSignoff = signoffs.find((s) => s.role === "MANAGER");
   const employeeSignoff = signoffs.find((s) => s.role === "EMPLOYEE");
   const canManagerSign = false;
@@ -919,7 +918,7 @@ export function AppraisalTabs({
           </div>
         </div>
       )}
-      {(status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE") &&
+      {(status === "PENDING_SIGNOFF" || status === "HR_REVIEW" || status === "COMPLETE") &&
         agreement?.status === "SIGNED" && (
           <div
             className="flex items-center gap-3 px-5 py-3 bg-[#ecfdf5] border border-[#6ee7b7] rounded-[10px]"
@@ -984,7 +983,7 @@ export function AppraisalTabs({
                 className="w-2 h-2 rounded-full shrink-0"
                 style={{
                   backgroundColor:
-                    status !== "PENDING_SIGNOFF" && status !== "HOD_REVIEW" && status !== "HR_REVIEW" && status !== "COMPLETE"
+                    status !== "PENDING_SIGNOFF" && status !== "HR_REVIEW" && status !== "COMPLETE"
                       ? "rgb(156 163 175)"
                       : allSignoffsComplete
                         ? "rgb(16 185 129)"

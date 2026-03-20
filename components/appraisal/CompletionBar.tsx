@@ -14,7 +14,7 @@ const SUBMIT_LABELS: Record<AppraisalStatus, string> = {
   SUBMITTED: "Submitted",
   MANAGER_REVIEW: "Proceed to Sign-off →",
   PENDING_SIGNOFF: "Sign Off →",
-  HOD_REVIEW: "HOD Sign Off →",
+  HOD_REVIEW: "Mark Complete →",
   HR_REVIEW: "Mark Complete →",
   COMPLETE: "",
 };

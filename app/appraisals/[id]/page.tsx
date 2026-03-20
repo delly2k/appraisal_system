@@ -44,7 +44,7 @@ async function getAppraisalDetail(
 
   const status = (appraisal.status as string) ?? "DRAFT";
   const needApprovals = status === "PENDING_APPROVAL";
-  const needSignoffs = status === "PENDING_SIGNOFF" || status === "HOD_REVIEW" || status === "HR_REVIEW" || status === "COMPLETE";
+  const needSignoffs = status === "PENDING_SIGNOFF" || status === "HR_REVIEW" || status === "COMPLETE";
 
   let approvals: { role: string }[] = [];
   let signoffs: { role: string; stage: string }[] = [];
@@ -75,7 +75,6 @@ async function getAppraisalDetail(
   const needAgreement =
     status === "MANAGER_REVIEW" ||
     status === "PENDING_SIGNOFF" ||
-    status === "HOD_REVIEW" ||
     status === "HR_REVIEW" ||
     status === "COMPLETE";
   if (needAgreement) {
@@ -171,7 +170,6 @@ const statusConfig: Record<string, { bg: string; text: string; border: string; d
   SUBMITTED: { bg: "#f0fdf4", text: "#166534", border: "#bbf7d0", dot: "#22c55e", label: "Submitted" },
   MANAGER_REVIEW: { bg: "#f3e8ff", text: "#6d28d9", border: "#ddd6fe", dot: "#7c3aed", label: "Manager Review" },
   PENDING_SIGNOFF: { bg: "#fffbeb", text: "#92400e", border: "#fde68a", dot: "#f59e0b", label: "Pending Sign-off" },
-  HOD_REVIEW: { bg: "#fdf2f8", text: "#9d174d", border: "#fbcfe8", dot: "#ec4899", label: "HOD Review" },
   HR_REVIEW: { bg: "#f0fdfa", text: "#0f766e", border: "#99f6e4", dot: "#0d9488", label: "HR Review" },
   COMPLETE: { bg: "#f0fdf4", text: "#166534", border: "#bbf7d0", dot: "#22c55e", label: "Complete" },
 };
@@ -183,9 +181,8 @@ const WORKFLOW_STEPS = [
   { status: "SELF_ASSESSMENT", label: "Self Assessment", short: "4" },
   { status: "MANAGER_REVIEW", label: "Manager Review", short: "5" },
   { status: "PENDING_SIGNOFF", label: "Sign-off", short: "6" },
-  { status: "HOD_REVIEW", label: "HOD Review", short: "7" },
-  { status: "HR_REVIEW", label: "HR Review", short: "8" },
-  { status: "COMPLETE", label: "Complete", short: "9" },
+  { status: "HR_REVIEW", label: "HR Review", short: "7" },
+  { status: "COMPLETE", label: "Complete", short: "8" },
 ] as const;
 
 function formatReviewType(type?: string): string {
