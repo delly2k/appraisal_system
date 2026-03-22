@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getReportingStructureFromDynamics } from "@/lib/reporting-structure";
+import { autoAssignReviewers } from "@/lib/feedback-auto-assign";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -42,6 +43,8 @@ export async function ensureParticipantIfLeader(
       },
       { onConflict: "cycle_id,employee_id" }
     );
+
+    await autoAssignReviewers(supabase, cycleId, employeeId);
   } catch {
     // Dynamics or DB failure: do not block the page; leave participant list as-is
   }

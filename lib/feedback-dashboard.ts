@@ -18,6 +18,8 @@ export interface ParticipantCycleProgress {
   direct_reports_total: number;
   direct_reports_submitted: number;
   self_status: "Pending" | "Submitted";
+  overall_360_score?: number | null;
+  manager_feedback_submitted?: boolean;
 }
 
 /**
@@ -77,6 +79,52 @@ export async function getParticipantFeedbackDashboard(
       }
     }
 
+    const reviewerIds = (reviewers ?? []).map((r) => r.id);
+    const { data: responses } = reviewerIds.length
+      ? await supabase
+          .from("feedback_response")
+          .select("reviewer_id, score")
+          .in("reviewer_id", reviewerIds)
+          .not("submitted_at", "is", null)
+      : { data: [] as { reviewer_id: string; score: number | null }[] };
+    const sumByReviewer = new Map<string, { sum: number; count: number }>();
+    for (const row of responses ?? []) {
+      if (row.score == null) continue;
+      const cur = sumByReviewer.get(row.reviewer_id) ?? { sum: 0, count: 0 };
+      cur.sum += Number(row.score);
+      cur.count += 1;
+      sumByReviewer.set(row.reviewer_id, cur);
+    }
+    const byType: Record<string, number[]> = {};
+    for (const r of reviewers ?? []) {
+      const scoreRec = sumByReviewer.get(r.id);
+      if (!scoreRec || scoreRec.count === 0) continue;
+      const val = scoreRec.sum / scoreRec.count;
+      const t = r.reviewer_type as string;
+      if (!byType[t]) byType[t] = [];
+      byType[t].push(val);
+    }
+    const avg = (vals: number[]) => (vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null);
+    const managerAvg = avg(byType.MANAGER ?? []);
+    const peerAvg = avg(byType.PEER ?? []);
+    const directAvg = avg(byType.DIRECT_REPORT ?? []);
+    let total = 0;
+    let used = 0;
+    if (managerAvg != null) {
+      total += managerAvg * 0.4;
+      used += 0.4;
+    }
+    if (peerAvg != null) {
+      total += peerAvg * 0.35;
+      used += 0.35;
+    }
+    if (directAvg != null) {
+      total += directAvg * 0.25;
+      used += 0.25;
+    }
+    const overall_360_score = used > 0 ? total / used : null;
+    const manager_feedback_submitted = (reviewers ?? []).some((r) => r.reviewer_type === "MANAGER" && r.status === "Submitted");
+
     result.push({
       cycle_id: cycle.id,
       cycle_name: cycle.cycle_name,
@@ -88,6 +136,8 @@ export async function getParticipantFeedbackDashboard(
       direct_reports_total,
       direct_reports_submitted,
       self_status,
+      overall_360_score,
+      manager_feedback_submitted,
     });
   }
 

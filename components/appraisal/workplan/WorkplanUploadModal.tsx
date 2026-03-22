@@ -5,15 +5,22 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import { UploadStepIndicator } from "./UploadStepIndicator";
 import type { ColumnMapping } from "@/app/api/appraisals/[id]/workplan/analyse-columns/route";
+import {
+  parseWorkplanWeight,
+  parseWorksheetToWorkplanRows,
+  shouldSkipMappingTarget,
+} from "@/lib/workplan-excel-parse";
 
 type Step = "upload" | "sheet" | "mapping" | "review" | "importing";
 
 const TARGET_FIELD_OPTIONS = [
   { value: "", label: "— Skip —" },
+  { value: "row_number", label: "Row # (skip)" },
   { value: "corporate_objective", label: "Corporate objective" },
   { value: "division_objective", label: "Division objective" },
   { value: "individual_objective", label: "Individual objective" },
   { value: "major_task", label: "Major task" },
+  { value: "activities", label: "Activities" },
   { value: "key_output", label: "Key output" },
   { value: "performance_standard", label: "Performance standard" },
   { value: "weight", label: "Weight (%)" },
@@ -71,14 +78,15 @@ function applyMappingClient(
   return nonEmpty
     .map((row) => {
       const item: Record<string, unknown> = {};
+      const activitiesParts: string[] = [];
+
       for (const m of mapping) {
-        if (!m.targetField || m.targetField === "SKIP") continue;
+        if (shouldSkipMappingTarget(m.targetField)) continue;
         const rawValue = row[m.excelColumn];
         if (rawValue === undefined || rawValue === null || rawValue === "") continue;
 
         if (m.targetField === "weight") {
-          const parsed = parseFloat(String(rawValue).replace(/%/g, "").trim());
-          item.weight = Number.isNaN(parsed) ? 0 : parsed;
+          item.weight = parseWorkplanWeight(rawValue);
         } else if (m.targetField === "metric_target") {
           const parsed = parseFloat(String(rawValue));
           item.metric_target = Number.isNaN(parsed) ? null : parsed;
@@ -96,10 +104,19 @@ function applyMappingClient(
           } else {
             item.metric_deadline = String(rawValue).trim();
           }
-        } else {
+        } else if (m.targetField === "activities") {
+          activitiesParts.push(String(rawValue).trim());
+        } else if (m.targetField) {
           item[m.targetField] = String(rawValue).trim();
         }
       }
+
+      if (activitiesParts.length > 0) {
+        const act = activitiesParts.join("\n");
+        const ko = item.key_output != null ? String(item.key_output).trim() : "";
+        item.key_output = ko ? `${act}\n${ko}` : act;
+      }
+
       return item;
     })
     .filter((item) => item.major_task && (item.weight as number) > 0);
@@ -121,13 +138,18 @@ export function WorkplanUploadModal({
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
   const [analysing, setAnalysing] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [templateMeta, setTemplateMeta] = useState<Record<string, string>>({});
+  /** 0-based sheet row where data headers were found; used to show B1:E3 metadata only for DBJ-style sheets. */
+  const [dataHeaderRowIndex, setDataHeaderRowIndex] = useState(0);
 
   useEffect(() => {
     if (step !== "sheet" || !workbookState?.workbook || !selectedSheet) return;
     const sheet = workbookState.workbook.Sheets[selectedSheet];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null }) as Record<string, unknown>[];
+    const { rows, headers, templateMeta: meta, headerRowIndex } = parseWorksheetToWorkplanRows(sheet);
     setSheetPreviewRows(rows);
-    setSheetPreviewHeaders(rows.length > 0 ? Object.keys(rows[0] as object) : []);
+    setSheetPreviewHeaders(headers);
+    setTemplateMeta(meta);
+    setDataHeaderRowIndex(headerRowIndex);
   }, [step, workbookState, selectedSheet]);
 
   const stepIndex = step === "upload" ? 0 : step === "sheet" ? 1 : step === "mapping" ? 2 : step === "review" ? 3 : 3;
@@ -151,10 +173,11 @@ export function WorkplanUploadModal({
   const onSheetSelected = useCallback(() => {
     if (!workbookState || !selectedSheet) return;
     const sheet = workbookState.workbook.Sheets[selectedSheet];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null }) as Record<string, unknown>[];
+    const { rows, headers: h, templateMeta: meta, headerRowIndex } = parseWorksheetToWorkplanRows(sheet);
     setAllRows(rows);
-    const h = sheetPreviewHeaders.length > 0 ? sheetPreviewHeaders : (rows.length > 0 ? Object.keys(rows[0] as object) : []);
     setHeaders(h);
+    setTemplateMeta(meta);
+    setDataHeaderRowIndex(headerRowIndex);
     setMappings([]);
     setStep("mapping");
     setAnalysing(true);
@@ -170,7 +193,7 @@ export function WorkplanUploadModal({
         }
       })
       .finally(() => setAnalysing(false));
-  }, [workbookState, selectedSheet, appraisalId, sheetPreviewHeaders]);
+  }, [workbookState, selectedSheet, appraisalId]);
 
   const previewItems = step === "review" ? applyMappingClient(allRows, mappings) : [];
   const totalWeight = previewItems.reduce((s, i) => s + ((i.weight as number) ?? 0), 0);
@@ -210,7 +233,7 @@ export function WorkplanUploadModal({
     }
   }, [appraisalId, workplanId, allRows, mappings, workbookState, selectedSheet, onComplete, onClose]);
 
-  const mappedCount = mappings.filter((m) => m.targetField && m.targetField !== "SKIP").length;
+  const mappedCount = mappings.filter((m) => m.targetField && !shouldSkipMappingTarget(m.targetField)).length;
   const skipCount = mappings.length - mappedCount;
 
   const modalContent = (
@@ -288,6 +311,19 @@ export function WorkplanUploadModal({
           {step === "sheet" && workbookState && (
             <>
               <p className="text-[12px] text-[#0f1f3d] font-medium mb-2">Select sheet</p>
+              {(() => {
+                const parts = [
+                  templateMeta.employeeName,
+                  templateMeta.division || templateMeta.unit,
+                  templateMeta.position,
+                ].filter(Boolean);
+                if (parts.length === 0 || dataHeaderRowIndex < 4) return null;
+                return (
+                  <p className="text-[11px] text-[#4a5a82] mb-3 px-1 py-2 rounded-[8px] bg-[#f8faff] border border-[#dde5f5]">
+                    <span className="font-semibold text-[#0f1f3d]">Detected:</span> {parts.join(" · ")}
+                  </p>
+                );
+              })()}
               <div className="flex flex-wrap gap-2 mb-4">
                 {workbookState.workbook.SheetNames.map((name) => (
                   <button

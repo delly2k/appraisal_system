@@ -21,10 +21,30 @@ export async function GET() {
     }
 
     const supabase = getSupabase();
-    const { data, error } = await supabase
+    const isHrOrAdmin = (user.roles ?? []).some((r) => r === "hr" || r === "admin");
+
+    let cycleIds: string[] | null = null;
+    if (!isHrOrAdmin) {
+      const employeeId = user.employee_id ?? null;
+      if (!employeeId) return NextResponse.json([]);
+
+      const [{ data: participantRows }, { data: reviewerRows }] = await Promise.all([
+        supabase.from("feedback_participant").select("cycle_id").eq("employee_id", employeeId),
+        supabase.from("feedback_reviewer").select("cycle_id").eq("reviewer_employee_id", employeeId),
+      ]);
+      const idSet = new Set<string>();
+      for (const r of participantRows ?? []) idSet.add(r.cycle_id);
+      for (const r of reviewerRows ?? []) idSet.add(r.cycle_id);
+      cycleIds = [...idSet];
+      if (cycleIds.length === 0) return NextResponse.json([]);
+    }
+
+    let query = supabase
       .from("feedback_cycle")
       .select("id, cycle_name, description, linked_appraisal_cycle_id, start_date, end_date, status, created_at")
       .order("end_date", { ascending: false });
+    if (cycleIds) query = query.in("id", cycleIds);
+    const { data, error } = await query;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

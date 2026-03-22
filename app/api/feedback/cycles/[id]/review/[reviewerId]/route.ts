@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import { logFeedbackAudit } from "@/lib/feedback-audit";
+import { computeAggregatedScore } from "@/lib/feedback-score";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -161,6 +162,29 @@ export async function POST(
           event_type: "review_submitted",
           actor_employee_id: user.employee_id ?? undefined,
         });
+      } catch {
+        // non-fatal
+      }
+
+      try {
+        const score = await computeAggregatedScore(
+          supabase,
+          cycleId,
+          reviewer.participant_employee_id
+        );
+        if (score.complete) {
+          await logFeedbackAudit(supabase, {
+            cycle_id: cycleId,
+            participant_employee_id: reviewer.participant_employee_id,
+            reviewer_id: reviewerId,
+            event_type: "review_updated",
+            actor_system: true,
+            metadata: {
+              weighted_overall_score: score.overall,
+              weighted_breakdown: score.byType,
+            },
+          });
+        }
       } catch {
         // non-fatal
       }

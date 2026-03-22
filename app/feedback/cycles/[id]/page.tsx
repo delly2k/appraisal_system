@@ -126,6 +126,7 @@ export default async function FeedbackCyclePage({
   const allReviewers = reviewerRows ?? [];
   const selfRow = allReviewers.find((r) => (r.reviewer_type as string) === "SELF");
   const others = allReviewers.filter((r) => (r.reviewer_type as string) !== "SELF");
+  const managerReviewer = others.find((r) => (r.reviewer_type as string) === "MANAGER");
 
   // Average score per reviewer from feedback_response
   const reviewerIds = allReviewers.map((r) => r.id);
@@ -147,6 +148,55 @@ export default async function FeedbackCyclePage({
     sumByReviewer.forEach((v, reviewerId) => {
       if (v.count > 0) scoreByReviewerId.set(reviewerId, v.sum / v.count);
     });
+  }
+
+  const byTypeScores: Record<string, number[]> = {};
+  for (const r of others) {
+    const score = scoreByReviewerId.get(r.id);
+    if (score == null) continue;
+    const type = (r.reviewer_type as string) ?? "PEER";
+    if (!byTypeScores[type]) byTypeScores[type] = [];
+    byTypeScores[type].push(score);
+  }
+  const avg = (vals: number[]) => (vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null);
+  const managerAvg = avg(byTypeScores.MANAGER ?? []);
+  const peerAvg = avg(byTypeScores.PEER ?? []);
+  const directAvg = avg(byTypeScores.DIRECT_REPORT ?? []);
+  const weightedOverall = (() => {
+    let total = 0;
+    let used = 0;
+    if (managerAvg != null) {
+      total += managerAvg * 0.4;
+      used += 0.4;
+    }
+    if (peerAvg != null) {
+      total += peerAvg * 0.35;
+      used += 0.35;
+    }
+    if (directAvg != null) {
+      total += directAvg * 0.25;
+      used += 0.25;
+    }
+    return used > 0 ? total / used : null;
+  })();
+
+  let managerResponses: { question: string; score: number | null; comment: string | null }[] = [];
+  if (managerReviewer) {
+    const { data: mgrResp } = await supabase
+      .from("feedback_response")
+      .select("score, comment, question_id")
+      .eq("reviewer_id", managerReviewer.id)
+      .not("submitted_at", "is", null);
+    const qIds = [...new Set((mgrResp ?? []).map((r) => r.question_id))];
+    const { data: qRows } = qIds.length
+      ? await supabase.from("feedback_question").select("id, question_text").in("id", qIds)
+      : { data: [] as { id: string; question_text: string }[] };
+    const qById = new Map((qRows ?? []).map((q) => [q.id, q.question_text]));
+    managerResponses = (mgrResp ?? []).map((r) => ({
+      question: qById.get(r.question_id) ?? "Question",
+      score: r.score == null ? null : Number(r.score),
+      comment: r.comment ?? null,
+    }));
   }
 
   // When closed, get reviewer names (all others — anonymity lifted)
@@ -237,6 +287,12 @@ export default async function FeedbackCyclePage({
             <span className="text-[10px] uppercase tracking-[.06em] text-[#8a97b8]">Total reviewers</span>
           </div>
         </div>
+        {weightedOverall != null && (
+          <div className="px-5 py-3 border-t border-[#dde5f5] bg-[#f8faff] flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-[#0f1f3d]">Overall 360 score</p>
+            <p className="text-[16px] font-bold text-[#0d9488]">{weightedOverall.toFixed(2)} / 5.00</p>
+          </div>
+        )}
       </div>
 
       {/* Self-assessment section */}
@@ -395,6 +451,33 @@ export default async function FeedbackCyclePage({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#dde5f5] bg-[#f8faff]">
+          <p className="text-[10px] font-bold uppercase tracking-[.07em] text-[#8a97b8]">Visibility Summary</p>
+        </div>
+        <div className="p-5 space-y-2">
+          <p className="text-[12px] text-[#0f1f3d]">Peers — {(byTypeScores.PEER ?? []).length} reviewer(s), average: {peerAvg != null ? peerAvg.toFixed(2) : "—"}</p>
+          <p className="text-[12px] text-[#0f1f3d]">Direct reports — {(byTypeScores.DIRECT_REPORT ?? []).length} reviewer(s), average: {directAvg != null ? directAvg.toFixed(2) : "—"}</p>
+          <p className="text-[12px] text-[#0f1f3d]">Manager average: {managerAvg != null ? managerAvg.toFixed(2) : "—"}</p>
+          {managerResponses.length > 0 ? (
+            <div className="mt-3">
+              <p className="text-[11px] font-semibold text-[#0f1f3d] mb-2">Manager feedback (attributed)</p>
+              <div className="space-y-2">
+                {managerResponses.map((r, idx) => (
+                  <div key={idx} className="border border-[#dde5f5] rounded-[8px] p-3">
+                    <p className="text-[11px] text-[#4a5a82]">{r.question}</p>
+                    <p className="text-[11px] text-[#0f1f3d] mt-1">Score: {r.score != null ? r.score.toFixed(1) : "—"}</p>
+                    {r.comment && <p className="text-[11px] text-[#4a5a82] mt-1">{r.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-[#8a97b8] mt-2">Manager feedback will appear after submission.</p>
+          )}
+        </div>
       </div>
     </div>
   );

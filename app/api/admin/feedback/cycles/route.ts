@@ -62,7 +62,29 @@ export async function GET() {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json(data ?? []);
+
+    const cycles = data ?? [];
+    const ids = cycles.map((c: { id: string }) => c.id).filter(Boolean);
+    const countByCycle = new Map<string, number>();
+    if (ids.length > 0) {
+      const { data: partRows, error: partErr } = await supabase
+        .from("feedback_participant")
+        .select("cycle_id")
+        .in("cycle_id", ids);
+      if (!partErr && partRows) {
+        for (const row of partRows) {
+          const cid = row.cycle_id as string;
+          countByCycle.set(cid, (countByCycle.get(cid) ?? 0) + 1);
+        }
+      }
+    }
+
+    const withCounts = cycles.map((c: Record<string, unknown>) => ({
+      ...c,
+      participant_count: countByCycle.get(c.id as string) ?? 0,
+    }));
+
+    return NextResponse.json(withCounts);
   } catch (err) {
     const message = err instanceof Error ? err.message : "List feedback cycles failed";
     return NextResponse.json({ error: message }, { status: 500 });

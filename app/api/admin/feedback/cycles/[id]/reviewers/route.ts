@@ -20,7 +20,7 @@ async function requireHrAdmin() {
 /**
  * POST /api/admin/feedback/cycles/[id]/reviewers
  * Add a reviewer assignment. Body: { participant_employee_id, reviewer_employee_id, reviewer_type }.
- * reviewer_type must be PEER, DIRECT_REPORT, or MANAGER. HR only. Peer max 4 per participant.
+ * reviewer_type must be PEER, DIRECT_REPORT, or MANAGER. HR only. Peer max 2 per participant.
  */
 export async function POST(
   request: NextRequest,
@@ -85,9 +85,23 @@ export async function POST(
         .eq("cycle_id", cycleId)
         .eq("participant_employee_id", participant_employee_id)
         .eq("reviewer_type", "PEER");
-      if ((count ?? 0) >= 4) {
+      if ((count ?? 0) >= 2) {
         return NextResponse.json(
-          { error: "Maximum of 4 peer reviewers per participant" },
+          { error: "Maximum of 2 peer reviewers per participant" },
+          { status: 400 }
+        );
+      }
+    }
+    if (reviewer_type === "MANAGER") {
+      const { count } = await supabase
+        .from("feedback_reviewer")
+        .select("id", { count: "exact", head: true })
+        .eq("cycle_id", cycleId)
+        .eq("participant_employee_id", participant_employee_id)
+        .eq("reviewer_type", "MANAGER");
+      if ((count ?? 0) >= 1) {
+        return NextResponse.json(
+          { error: "Only one manager reviewer is allowed per participant" },
           { status: 400 }
         );
       }

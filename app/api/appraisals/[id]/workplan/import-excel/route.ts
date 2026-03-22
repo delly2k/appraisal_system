@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import type { ColumnMapping } from "../analyse-columns/route";
+import { parseWorkplanWeight, shouldSkipMappingTarget } from "@/lib/workplan-excel-parse";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -64,15 +65,15 @@ function applyMapping(
       status: "active",
       version: 1,
     };
+    const activitiesParts: string[] = [];
 
     for (const m of mapping) {
-      if (!m.targetField || m.targetField === "SKIP") continue;
+      if (shouldSkipMappingTarget(m.targetField)) continue;
       const rawValue = (row as Record<string, unknown>)[m.excelColumn];
       if (rawValue === undefined || rawValue === null || rawValue === "") continue;
 
       if (m.targetField === "weight") {
-        const parsed = parseFloat(String(rawValue).replace(/%/g, "").trim());
-        item.weight = Number.isNaN(parsed) ? 0 : parsed;
+        item.weight = parseWorkplanWeight(rawValue);
       } else if (m.targetField === "metric_target") {
         const parsed = parseFloat(String(rawValue));
         item.metric_target = Number.isNaN(parsed) ? null : parsed;
@@ -90,9 +91,18 @@ function applyMapping(
         } else {
           item.metric_deadline = String(rawValue).trim();
         }
-      } else {
+      } else if (m.targetField === "activities") {
+        activitiesParts.push(String(rawValue).trim());
+      } else if (m.targetField) {
         (item as Record<string, unknown>)[m.targetField] = String(rawValue).trim();
       }
+    }
+
+    if (activitiesParts.length > 0) {
+      const act = activitiesParts.join("\n");
+      item.key_output = item.key_output?.trim()
+        ? `${act}\n${item.key_output.trim()}`
+        : act;
     }
 
     if (item.major_task && (item.weight ?? 0) > 0) {
@@ -149,15 +159,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       .eq("id", appraisalId)
       .single();
 
-    if (appErr || !appraisal)
-      return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
+    if (appErr || !appraisal) return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
 
     const canEdit =
       user.roles?.some((r) => r === "hr" || r === "admin") ||
       appraisal.employee_id === user.employee_id ||
       appraisal.manager_employee_id === user.employee_id;
-    if (!canEdit)
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const appStatus = (appraisal.status ?? "").toUpperCase();
     if (appStatus !== "DRAFT") {
@@ -171,8 +179,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       .eq("appraisal_id", appraisalId)
       .single();
 
-    if (wpErr || !workplan)
-      return NextResponse.json({ error: "Workplan not found" }, { status: 404 });
+    if (wpErr || !workplan) return NextResponse.json({ error: "Workplan not found" }, { status: 404 });
 
     const wpStatus = (workplan.status ?? "draft").toLowerCase();
     if (wpStatus !== "draft") {
@@ -182,13 +189,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const itemsToInsert = applyMapping(rows, mapping);
     const errors: string[] = [];
 
-    for (const it of itemsToInsert) {
-      if (!it.major_task || !it.major_task.trim()) errors.push("Every row must have a Major task.");
-      if (it.weight == null || Number.isNaN(it.weight)) errors.push("Every row must have a Weight.");
-    }
+    itemsToInsert.forEach((it, idx) => {
+      const rowLabel = idx + 1;
+      if (!it.major_task?.trim()) {
+        errors.push(`Row ${rowLabel} is missing a Major Task — this column is required.`);
+      }
+      if (it.weight == null || Number.isNaN(it.weight) || it.weight <= 0) {
+        errors.push(`Row ${rowLabel} is missing a valid Weight — check your Weighting column.`);
+      }
+    });
+
     const totalWeight = itemsToInsert.reduce((s, i) => s + i.weight, 0);
-    if (Math.abs(totalWeight - 100) > 2) {
-      errors.push(`Weights sum to ${totalWeight.toFixed(1)}%; they must sum to 100% (±2).`);
+    if (itemsToInsert.length > 0 && Math.abs(totalWeight - 100) > 2) {
+      errors.push(
+        `Weights sum to ${totalWeight.toFixed(1)}% — please check your Weighting column. Note: enter numbers like 20 (percent points), not 0.20 unless you mean a fraction of 100%.`
+      );
     }
     const majorTasks = itemsToInsert.map((i) => i.major_task.trim().toLowerCase());
     const dupes = majorTasks.filter((t, i) => majorTasks.indexOf(t) !== i);
@@ -200,10 +215,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ errors }, { status: 422 });
     }
 
-    const { error: delErr } = await supabase
-      .from("workplan_items")
-      .delete()
-      .eq("workplan_id", workplanId);
+    const { error: delErr } = await supabase.from("workplan_items").delete().eq("workplan_id", workplanId);
 
     if (delErr) {
       return NextResponse.json({ error: delErr.message }, { status: 500 });
@@ -214,10 +226,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       workplan_id: workplanId,
     }));
 
-    const { data: inserted, error: insErr } = await supabase
-      .from("workplan_items")
-      .insert(insertPayload)
-      .select();
+    const { data: inserted, error: insErr } = await supabase.from("workplan_items").insert(insertPayload).select();
 
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 });

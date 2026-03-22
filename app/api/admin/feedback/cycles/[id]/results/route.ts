@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { computeAggregatedScore } from "@/lib/feedback-score";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -73,51 +74,71 @@ export async function GET(
       }
     }
 
-    const { data: aggregates, error: aggErr } = await supabase
-      .from("feedback_response_anonymous_aggregate")
-      .select("participant_employee_id, reviewer_type, response_count, average_score, comments")
+    const { data: reviewers, error: revErr } = await supabase
+      .from("feedback_reviewer")
+      .select("id, participant_employee_id, reviewer_type")
       .eq("cycle_id", cycleId);
+    if (revErr) return NextResponse.json({ error: revErr.message }, { status: 500 });
 
-    if (aggErr) {
-      return NextResponse.json({ error: aggErr.message }, { status: 500 });
-    }
+    const reviewerIds = (reviewers ?? []).map((r) => r.id);
+    const { data: responses, error: respErr } = reviewerIds.length
+      ? await supabase
+          .from("feedback_response")
+          .select("reviewer_id, score, comment")
+          .in("reviewer_id", reviewerIds)
+          .not("submitted_at", "is", null)
+      : { data: [], error: null };
+    if (respErr) return NextResponse.json({ error: respErr.message }, { status: 500 });
 
-    const resultsByParticipant = new Map<
-      string,
-      { self?: { count: number; avg: number; comments: string[] }; peer?: { count: number; avg: number; comments: string[] }; direct_report?: { count: number; avg: number; comments: string[] } }
-    >();
-
-    for (const row of aggregates ?? []) {
-      const empId = row.participant_employee_id;
-      if (!resultsByParticipant.has(empId)) {
-        resultsByParticipant.set(empId, {});
+    const reviewerMeta = new Map(
+      (reviewers ?? []).map((r) => [r.id, { participant: r.participant_employee_id, type: r.reviewer_type as string }])
+    );
+    const sums = new Map<string, { sum: number; count: number; comments: string[] }>();
+    for (const row of responses ?? []) {
+      const meta = reviewerMeta.get(row.reviewer_id);
+      if (!meta) continue;
+      const key = `${meta.participant}:${meta.type}`;
+      const cur = sums.get(key) ?? { sum: 0, count: 0, comments: [] };
+      if (row.score != null) {
+        cur.sum += Number(row.score);
+        cur.count += 1;
       }
-      const rec = resultsByParticipant.get(empId)!;
-      const type = row.reviewer_type as "SELF" | "PEER" | "DIRECT_REPORT";
-      const entry = {
-        count: Number(row.response_count),
-        avg: Number(row.average_score),
-        comments: Array.isArray(row.comments) ? row.comments : [],
-      };
-      if (type === "SELF") rec.self = entry;
-      else if (type === "PEER") rec.peer = entry;
-      else if (type === "DIRECT_REPORT") rec.direct_report = entry;
+      if (typeof row.comment === "string" && row.comment.trim()) {
+        cur.comments.push(row.comment.trim());
+      }
+      sums.set(key, cur);
     }
 
     const results = participantIds.map((employee_id) => {
-      const aggregates = resultsByParticipant.get(employee_id) ?? {};
+      const makeEntry = (type: "SELF" | "PEER" | "DIRECT_REPORT" | "MANAGER") => {
+        const rec = sums.get(`${employee_id}:${type}`);
+        if (!rec || rec.count === 0) return null;
+        return { count: rec.count, avg: rec.sum / rec.count, comments: rec.comments };
+      };
+      const self = makeEntry("SELF");
+      const peer = makeEntry("PEER");
+      const direct = makeEntry("DIRECT_REPORT");
+      const manager = makeEntry("MANAGER");
       return {
         employee_id,
         full_name: nameByEmployeeId.get(employee_id) ?? employee_id,
-        self: aggregates.self ?? null,
-        peer: aggregates.peer ?? null,
-        direct_report: aggregates.direct_report ?? null,
+        self,
+        peer,
+        direct_report: direct,
+        manager,
       };
     });
+
+    const weightedByParticipant: Record<string, number | null> = {};
+    for (const employee_id of participantIds) {
+      const score = await computeAggregatedScore(supabase, cycleId, employee_id);
+      weightedByParticipant[employee_id] = score.overall;
+    }
 
     return NextResponse.json({
       cycle: { id: cycle.id, cycle_name: cycle.cycle_name, status: cycle.status },
       results,
+      weighted_overall: weightedByParticipant,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Load results failed";

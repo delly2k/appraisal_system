@@ -173,7 +173,7 @@ export async function POST(
         signers.push({ email: mgr.email, name: mgr.full_name ?? "Manager" });
       } else {
         if (!hod?.email) return NextResponse.json({ error: "No HOD configured" }, { status: 500 });
-        signers.push({ email: hod.email, name: hod.full_name ?? "HOD" });
+        signers.push({ email: hod.email, name: hod.full_name ?? "Head of Department" });
       }
     }
 

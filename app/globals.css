@@ -168,6 +168,21 @@
   animation: slideIn 0.3s ease both;
 }
 
+/* HR dashboard AI insights loading skeleton */
+@keyframes hrAiInsightsSkeleton {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.hr-ai-insights-skeleton {
+  animation: hrAiInsightsSkeleton 1.5s ease-in-out infinite;
+}
+
 /* Back link hover */
 .back-link:hover {
   color: #3b82f6 !important;

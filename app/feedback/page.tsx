@@ -227,6 +227,8 @@ interface MyCycleRow {
   selfStatus: string;
   reviewers: Array<{ id: string; name: string; reviewType: string; status: string }>;
   reviewerProgress: { submitted: number; total: number };
+  overall360Score: number | null;
+  managerFeedbackSubmitted: boolean;
 }
 
 interface PendingReviewRow {
@@ -347,6 +349,8 @@ export default async function FeedbackPage() {
         selfStatus,
         reviewers,
         reviewerProgress,
+        overall360Score: c.overall_360_score ?? null,
+        managerFeedbackSubmitted: !!c.manager_feedback_submitted,
       };
     });
   }
@@ -462,7 +466,7 @@ export default async function FeedbackPage() {
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-[#f8faff]">
-                {["Cycle", "Period", "Type", "Reviewers assigned", "Reviewer progress", "My status", ""].map((h) => (
+                {["Cycle", "Period", "Type", "Reviewers assigned", "Reviewer progress", "Overall score", "My status", ""].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[.06em] text-[#8a97b8] whitespace-nowrap border-b border-[#dde5f5]"
@@ -475,7 +479,7 @@ export default async function FeedbackPage() {
             <tbody>
               {myCycles.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[12px] text-[#8a97b8]">
+                  <td colSpan={8} className="px-4 py-10 text-center text-[12px] text-[#8a97b8]">
                     No active cycles — when you are added to a cycle it will appear here
                   </td>
                 </tr>
@@ -522,6 +526,16 @@ export default async function FeedbackPage() {
                           </div>
                           <span className="text-[11px] text-[#8a97b8]">
                             {submitted}/{total}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col">
+                          <span className="text-[12px] font-semibold text-[#0f1f3d]">
+                            {cycle.overall360Score != null ? cycle.overall360Score.toFixed(2) : "—"}
+                          </span>
+                          <span className="text-[10px] text-[#8a97b8]">
+                            {cycle.managerFeedbackSubmitted ? "Manager feedback included" : "Awaiting manager feedback"}
                           </span>
                         </div>
                       </td>

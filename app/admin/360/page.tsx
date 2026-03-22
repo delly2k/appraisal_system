@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,8 @@ interface FeedbackCycle {
   linked_appraisal_cycle_id: string;
   peer_feedback_visible_to_reviewee?: boolean;
   direct_report_feedback_visible_to_reviewee?: boolean;
+  /** From GET /api/admin/feedback/cycles — used only to disable "Initialize 360" after seeding */
+  participant_count?: number;
 }
 
 interface ParticipantResult {
@@ -208,6 +210,10 @@ export default function Admin360Page() {
 
   /** Close cycle / reopen / remove response in progress */
   const [closeCycleLoading, setCloseCycleLoading] = useState<string | null>(null);
+  /** Initialize 360 participants (HR retry when auto-start missed) */
+  const [seed360Loading, setSeed360Loading] = useState<string | null>(null);
+  /** Batch initialize all non-Closed cycles with zero participants */
+  const [initializeAllLoading, setInitializeAllLoading] = useState(false);
   const [reopenLoading, setReopenLoading] = useState<string | null>(null);
   const [removeResponseLoading, setRemoveResponseLoading] = useState<string | null>(null);
 
@@ -222,7 +228,15 @@ export default function Admin360Page() {
         setCycles([]);
         return;
       }
-      setCycles(Array.isArray(data) ? data : []);
+      setCycles(
+        Array.isArray(data)
+          ? data.map((row: FeedbackCycle) => ({
+              ...row,
+              participant_count:
+                typeof row.participant_count === "number" ? row.participant_count : 0,
+            }))
+          : []
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
       setCycles([]);
@@ -234,6 +248,11 @@ export default function Admin360Page() {
   useEffect(() => {
     loadCycles();
   }, [loadCycles]);
+
+  const pending360Count = useMemo(
+    () => cycles.filter((c) => c.status !== "Closed" && (c.participant_count ?? 0) === 0).length,
+    [cycles]
+  );
 
   /** Fetch eligible reviewers for modal when participant and type are set */
   useEffect(() => {
@@ -332,8 +351,8 @@ export default function Admin360Page() {
   };
 
   /** Load assignments + results for a cycle and cache; used when expanding a cycle card */
-  const loadCycleData = useCallback(async (cycleId: string) => {
-    if (cycleDataCache[cycleId]) return;
+  const loadCycleData = useCallback(async (cycleId: string, force = false) => {
+    if (!force && cycleDataCache[cycleId]) return;
     setCycleDataLoading(cycleId);
     setError(null);
     try {
@@ -370,7 +389,7 @@ export default function Admin360Page() {
         return;
       }
       setExpandedCycleId(cycleId);
-      await loadCycleData(cycleId);
+      await loadCycleData(cycleId, false);
     },
     [expandedCycleId, loadCycleData]
   );
@@ -434,6 +453,76 @@ export default function Admin360Page() {
           });
         });
     refetch();
+  };
+
+  const initialize360Cycle = async (cycleId: string) => {
+    setError(null);
+    setSeed360Loading(cycleId);
+    try {
+      const res = await fetch(`/api/admin/feedback/cycles/${cycleId}/activate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to initialize 360");
+        return;
+      }
+      if (data.alreadySeeded) {
+        showSuccess("360 already has participants.");
+      } else {
+        showSuccess(
+          data.participantCount > 0
+            ? `360 initialized: ${data.participantCount} participant(s).`
+            : "360 activated; no eligible managers found in reporting lines."
+        );
+      }
+      setCycleDataCache((prev) => {
+        const next = { ...prev };
+        delete next[cycleId];
+        return next;
+      });
+      await loadCycles();
+      if (expandedCycleId === cycleId) {
+        await loadCycleData(cycleId, true);
+      }
+    } finally {
+      setSeed360Loading(null);
+    }
+  };
+
+  const initializeAllPending360 = async () => {
+    setError(null);
+    setInitializeAllLoading(true);
+    try {
+      const res = await fetch("/api/admin/feedback/cycles/activate-pending", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to initialize pending cycles");
+        return;
+      }
+      const results = (data.results ?? []) as Array<
+        | { ok: true; alreadySeeded: boolean; cycleName: string }
+        | { ok: false; cycleName: string; error: string }
+      >;
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        setSuccess(null);
+        setError(failures.map((f) => `${f.cycleName}: ${f.error}`).join("; "));
+      } else if (data.processed === 0) {
+        showSuccess("No pending 360 cycles to initialize.");
+      } else {
+        const seeded = results.filter((r) => r.ok && !r.alreadySeeded).length;
+        const already = results.filter((r) => r.ok && r.alreadySeeded).length;
+        showSuccess(
+          `Initialized ${seeded} cycle(s); ${already} already had participants (${data.processed} total).`
+        );
+      }
+      setCycleDataCache({});
+      await loadCycles();
+      if (expandedCycleId) {
+        await loadCycleData(expandedCycleId, true);
+      }
+    } finally {
+      setInitializeAllLoading(false);
+    }
   };
 
   const closeCycle = async (cycleId: string) => {
@@ -603,8 +692,8 @@ export default function Admin360Page() {
             <Feedback360Icon />
           </div>
           <h1
+            className="font-display"
             style={{
-              fontFamily: "Sora, sans-serif",
               fontSize: "24px",
               fontWeight: 700,
               color: "#0f1f3d",
@@ -705,7 +794,7 @@ export default function Admin360Page() {
               <Feedback360Icon />
             </div>
             <div>
-              <div style={{ fontFamily: "Sora, sans-serif", fontSize: "15px", fontWeight: 600, color: "#0f1f3d" }}>
+              <div className="font-display" style={{ fontSize: "15px", fontWeight: 600, color: "#0f1f3d" }}>
                 All 360 cycles and results
               </div>
               <div style={{ fontSize: "12px", color: "#8a97b8", marginTop: "1px" }}>
@@ -713,20 +802,31 @@ export default function Admin360Page() {
               </div>
             </div>
           </div>
-          <input
-            type="search"
-            placeholder="Search participants by name or department…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: "8px",
-              border: "1px solid #dde5f5",
-              fontSize: "13px",
-              minWidth: "260px",
-              background: "#f8faff",
-            }}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <input
+              type="search"
+              placeholder="Search participants by name or department…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #dde5f5",
+                fontSize: "13px",
+                minWidth: "260px",
+                background: "#f8faff",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => initializeAllPending360()}
+              disabled={initializeAllLoading || loading || pending360Count === 0}
+              title="Runs the same Initialize 360 action for every non-Closed cycle that has no participants yet"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-[8px] border border-[#a78bfa] bg-[#ede9fe] text-[10px] font-semibold text-[#5b21b6] hover:bg-[#ddd6fe] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {initializeAllLoading ? "Initializing…" : `Initialize all pending (${pending360Count})`}
+            </button>
+          </div>
         </div>
 
         <div style={{ padding: "16px 24px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -786,7 +886,7 @@ export default function Admin360Page() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-['Sora'] text-[14px] font-bold text-[#0f1f3d]">
+                          <span className="font-display text-[14px] font-bold text-[#0f1f3d]">
                             {c.cycle_name}
                           </span>
                           {c.status === "Active" && (
@@ -815,6 +915,26 @@ export default function Admin360Page() {
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="border border-[#dde5f5] rounded-[8px] px-3 py-2 text-[11px] w-[200px] outline-none bg-white focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/10"
                       />
+                      {c.status !== "Closed" && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            initialize360Cycle(c.id);
+                          }}
+                          disabled={
+                            seed360Loading === c.id || (c.participant_count ?? 0) > 0
+                          }
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#a78bfa] bg-[#ede9fe] text-[10px] font-semibold text-[#5b21b6] hover:bg-[#ddd6fe] disabled:opacity-50"
+                          title={
+                            (c.participant_count ?? 0) > 0
+                              ? "Participants already created for this cycle"
+                              : "Use if 360 participants were not created when the appraisal cycle opened"
+                          }
+                        >
+                          {seed360Loading === c.id ? "Initializing…" : "Initialize 360"}
+                        </button>
+                      )}
                       {c.status === "Active" && (
                         <button
                           type="button"
@@ -864,7 +984,7 @@ export default function Admin360Page() {
                                 { label: "Pending", value: pending + notStarted, color: "#d97706" },
                               ].map((kpi) => (
                                 <div key={kpi.label} className="flex flex-col items-center py-4 gap-0.5">
-                                  <span className="font-['Sora'] text-[22px] font-bold" style={{ color: kpi.color }}>
+                                  <span className="font-display text-[22px] font-bold" style={{ color: kpi.color }}>
                                     {kpi.value}
                                   </span>
                                   <span className="text-[10px] font-medium uppercase tracking-[.06em] text-[#8a97b8]">
@@ -1107,7 +1227,7 @@ export default function Admin360Page() {
                   {getInitials(detailParticipant.participant_name, detailParticipant.participant_employee_id)}
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <h2 id="detail-modal-title" style={{ fontFamily: "Sora, sans-serif", fontSize: "18px", fontWeight: 600, color: "#0f1f3d", margin: 0 }}>
+                  <h2 id="detail-modal-title" className="font-display" style={{ fontSize: "18px", fontWeight: 600, color: "#0f1f3d", margin: 0 }}>
                     {detailParticipant.participant_name}
                   </h2>
                   <p style={{ fontSize: "13px", color: "#8a97b8", marginTop: "2px" }}>
@@ -1163,7 +1283,17 @@ export default function Admin360Page() {
 
             <div style={{ padding: "20px 24px", overflow: "auto", flex: 1 }}>
               {/* Results: three score cards */}
-              <h3 style={{ fontFamily: "Sora, sans-serif", fontSize: "11px", fontWeight: 600, color: "#8a97b8", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              <h3
+                className="font-display"
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  color: "#8a97b8",
+                  marginBottom: "10px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
                 Results
               </h3>
               {detailResultsLoading ? (
@@ -1234,7 +1364,17 @@ export default function Admin360Page() {
 
               {/* Reviewers */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
-                <h3 style={{ fontFamily: "Sora, sans-serif", fontSize: "11px", fontWeight: 600, color: "#8a97b8", margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                <h3
+                  className="font-display"
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "#8a97b8",
+                    margin: 0,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
                   Reviewers
                 </h3>
                 {detailParticipant.reviewers.length > 0 && (
