@@ -13,7 +13,7 @@ const TABS = [
   { id: "competencies", label: "Competencies" },
   { id: "ratings", label: "Rating scale" },
   { id: "rules", label: "Recommendation rules" },
-  { id: "visibility", label: "360 visibility" },
+  { id: "360-settings", label: "360 settings" },
   { id: "sync", label: "Employee sync" },
 ] as const;
 
@@ -61,7 +61,7 @@ export function AdminTabs() {
       {active === "competencies" && <CompetenciesTab />}
       {active === "ratings" && <RatingScaleTab />}
       {active === "rules" && <RecommendationRulesTab />}
-      {active === "visibility" && <VisibilityTab />}
+      {active === "360-settings" && <VisibilityTab />}
       {active === "sync" && <EmployeeSyncTab />}
     </>
   );

@@ -104,12 +104,16 @@ const config: Config = {
       },
       animation: {
         "fade-up": "fadeUp 0.4s ease both",
-        "pulse-slow": "pulse 2s infinite",
+        "pulse-slow": "pulse-opacity-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
       keyframes: {
         fadeUp: {
           from: { opacity: "0", transform: "translateY(14px)" },
           to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "pulse-opacity-slow": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
         },
       },
     },

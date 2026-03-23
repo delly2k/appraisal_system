@@ -3,6 +3,16 @@ import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { getParticipantFeedbackDashboard } from "@/lib/feedback-dashboard";
 import { ensureParticipantIfLeader } from "@/lib/feedback-ensure-participant";
+import {
+  buildCycleResultsForEmployees,
+  formatScoreOutOf10,
+  getFeedbackCycleResultsForViewer,
+  getParticipantOverallAverageSubmitted,
+  getReviewerCompletionByType,
+  scoreOutOf10,
+  type FeedbackCycleResultRow,
+} from "@/lib/feedback-cycle-results";
+import { cn } from "@/lib/utils";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,16 +22,22 @@ function getSupabase() {
 }
 
 const AVATAR_COLORS = [
-  "#4f46e5", "#f59e0b", "#ef4444",
-  "#10b981", "#3b82f6", "#8b5cf6", "#ec4899",
+  "#4f46e5",
+  "#f59e0b",
+  "#ef4444",
+  "#10b981",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
 ];
 
 function getInitials(name: string) {
-  return name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-}
-
-function capitalize(str: string) {
-  return str.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 function formatDate(date: string | null) {
@@ -37,112 +53,27 @@ function formatDate(date: string | null) {
   }
 }
 
-// ----- Shared section header -----
-function SectionHeader({
-  icon,
-  iconBg,
-  iconBorder,
-  title,
-  subtitle,
-  count,
-  countStyle,
-}: {
-  icon: React.ReactNode;
-  iconBg: string;
-  iconBorder: string;
-  title: string;
-  subtitle: string;
-  count?: number | null;
-  countStyle?: string;
-}) {
+function RelationshipPill({ type }: { type: string }) {
+  const map: Record<string, string> = {
+    MANAGER: "bg-amber-50 border-amber-200 text-amber-900",
+    DIRECT_REPORT: "bg-pink-50 border-pink-200 text-pink-900",
+    PEER: "bg-teal-50 border-teal-200 text-teal-900",
+    SELF: "bg-blue-50 border-blue-200 text-blue-900",
+  };
+  const label = type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
-    <div className="flex items-center gap-3 mb-3">
-      <div
-        className={`w-9 h-9 rounded-[10px] flex items-center justify-center
-                       flex-shrink-0 border ${iconBg} ${iconBorder}`}
-      >
-        {icon}
-      </div>
-      <div className="flex-1">
-        <p className="font-['Sora'] text-[13px] font-bold text-[#0f1f3d]">{title}</p>
-        <p className="text-[11px] text-[#8a97b8] mt-0.5">{subtitle}</p>
-      </div>
-      {count != null && countStyle && (
-        <span
-          className={`inline-flex items-center justify-center min-w-[20px] h-5
-                          px-1.5 rounded-full text-[10px] font-bold border ${countStyle}`}
-        >
-          {count}
-        </span>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-semibold",
+        map[type] ?? map.PEER
       )}
-    </div>
-  );
-}
-
-// ----- Avatar stack -----
-function AvatarStack({
-  reviewers,
-  totalAssigned,
-}: {
-  reviewers: { name: string; reviewType: string }[];
-  totalAssigned?: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex">
-        {reviewers.slice(0, 5).map((r, i) => (
-          <div
-            key={i}
-            title={`${r.name} (${capitalize(r.reviewType)})`}
-            className="w-[26px] h-[26px] rounded-full flex items-center justify-center
-                       text-[9px] font-semibold text-white border-2 border-white
-                       flex-shrink-0"
-            style={{
-              background: AVATAR_COLORS[i % AVATAR_COLORS.length],
-              marginLeft: i === 0 ? 0 : "-7px",
-              zIndex: 10 - i,
-            }}
-          >
-            {getInitials(r.name)}
-          </div>
-        ))}
-        {reviewers.length > 5 && (
-          <div
-            className="w-[26px] h-[26px] rounded-full flex items-center justify-center
-                       text-[9px] font-semibold border-2 border-white flex-shrink-0
-                       bg-[#eef2fb] text-[#8a97b8]"
-            style={{ marginLeft: "-7px" }}
-          >
-            +{reviewers.length - 5}
-          </div>
-        )}
-      </div>
-      {reviewers.length > 0 && (
-        <span className="text-[10px] text-[#8a97b8]">
-          {reviewers.length} {reviewers.length === 1 ? "reviewer" : "reviewers"}
-        </span>
-      )}
-      {reviewers.length === 0 && (
-        <span className="text-[11px] text-[#8a97b8]">
-          {totalAssigned != null && totalAssigned > 0
-            ? `${totalAssigned} assigned (not visible)`
-            : "None assigned"}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ----- Badges -----
-function CycleBadge({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#eff6ff] border border-[#bfdbfe] text-[10px] font-semibold text-[#1d4ed8]">
+    >
       {label}
     </span>
   );
 }
 
-function TypeBadge({ type }: { type: string }) {
+function TypeBadgeClosed({ type }: { type: string }) {
   const map: Record<string, string> = {
     ANNUAL: "bg-[#f5f3ff] border-[#ddd6fe] text-[#6d28d9]",
     MID_YEAR: "bg-[#fffbeb] border-[#fcd34d] text-[#92400e]",
@@ -153,94 +84,191 @@ function TypeBadge({ type }: { type: string }) {
   };
   const label = type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-semibold ${map[type] ?? map.PEER}`}>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold",
+        map[type] ?? map.PEER
+      )}
+    >
       {label}
     </span>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; dot: string; className: string }> = {
-    SUBMITTED: { label: "Submitted", dot: "#3b82f6", className: "bg-[#eff6ff] border-[#bfdbfe] text-[#1d4ed8]" },
-    PENDING: { label: "Pending", dot: "#d97706", className: "bg-[#fffbeb] border-[#fcd34d] text-[#92400e]" },
-    IN_PROGRESS: { label: "In progress", dot: "#d97706", className: "bg-[#fffbeb] border-[#fcd34d] text-[#92400e]" },
-    COMPLETED: { label: "Completed", dot: "#059669", className: "bg-[#ecfdf5] border-[#6ee7b7] text-[#065f46]" },
-    DRAFT: { label: "Draft", dot: "#8a97b8", className: "bg-[#f8faff] border-[#dde5f5] text-[#8a97b8]" },
-  };
-  const s = map[status] ?? map.PENDING;
+function CycleBadge({ label }: { label: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-semibold ${s.className}`}>
-      <span className="w-[5px] h-[5px] rounded-full flex-shrink-0" style={{ background: s.dot }} />
-      {s.label}
+    <span className="inline-flex items-center rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2.5 py-1 text-[10px] font-semibold text-[#1d4ed8]">
+      {label}
     </span>
   );
 }
 
-// ----- Icons (inline SVGs) -----
-const Icon360 = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
-    <circle cx="12" cy="12" r="4" />
-    <path d="M16 8v5a3 3 0 006 0v-1a10 10 0 10-3.92 7.94" />
-  </svg>
-);
-const Icon360Small = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
-    <circle cx="12" cy="12" r="4" />
-    <path d="M16 8v5a3 3 0 006 0v-1a10 10 0 10-3.92 7.94" />
-  </svg>
-);
-const IconEdit = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2">
-    <path d="M12 20h9" />
-    <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-  </svg>
-);
-const IconCheck = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a97b8" strokeWidth="2">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-    <polyline points="22 4 12 14.01 9 11.01" />
-  </svg>
-);
+function CompletedStatusBadge() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#6ee7b7] bg-[#ecfdf5] px-2.5 py-1 text-[10px] font-semibold text-[#065f46]">
+      <span className="h-[5px] w-[5px] rounded-full bg-[#059669]" />
+      Completed
+    </span>
+  );
+}
+
 const ChevronRight = () => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <polyline points="9 18 15 12 9 6" />
   </svg>
 );
 
-interface FeedbackCycle {
-  id: string;
-  cycle_name: string;
-  description: string | null;
-  linked_appraisal_cycle_id: string;
-  start_date: string | null;
-  end_date: string | null;
-  status: string;
-  created_at: string;
-}
-
-interface MyCycleRow {
-  id: string;
-  name: string;
-  cycleLabel: string;
-  type: string;
-  dueDate: string | null;
-  selfStatus: string;
-  reviewers: Array<{ id: string; name: string; reviewType: string; status: string }>;
-  reviewerProgress: { submitted: number; total: number };
-  overall360Score: number | null;
-  managerFeedbackSubmitted: boolean;
-}
-
-interface PendingReviewRow {
+type TaskRow = {
   id: string;
   cycleId: string;
-  cycleLabel: string;
+  href: string;
   participantName: string;
+  participantEmployeeId: string;
   department: string;
   reviewType: string;
   dueDate: string | null;
+  reviewerStatus: string;
+  savedResponseCount: number;
+};
+
+function taskProgressLabel(row: TaskRow): "Pending" | "In_Progress" | "Completed" {
+  if (row.reviewerStatus === "Submitted") return "Completed";
+  if (row.savedResponseCount > 0) return "In_Progress";
+  return "Pending";
+}
+
+function MyProgressCell({ row }: { row: TaskRow }) {
+  const p = taskProgressLabel(row);
+  if (p === "Completed") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#16a34a]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />
+        Submitted
+      </span>
+    );
+  }
+  if (p === "In_Progress") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-[#2563eb]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#2563eb]" />
+        In progress
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-[#94a3b8]">
+      <span className="h-1.5 w-1.5 rounded-full bg-[#cbd5e1]" />
+      Not started
+    </span>
+  );
+}
+
+function ScoreVisibleCell({
+  row,
+  weightedOverall,
+  drSubmitted,
+  drTotal,
+}: {
+  row: TaskRow;
+  weightedOverall: number | null | undefined;
+  drSubmitted: number;
+  drTotal: number;
+}) {
+  const t = row.reviewType;
+  if (t === "DIRECT_REPORT") {
+    const w = weightedOverall;
+    const so = scoreOutOf10(w ?? undefined);
+    const scorePart = so != null ? `${so.toFixed(1)}/10` : "—";
+    return (
+      <span className="text-xs text-[#0f2044]">
+        {scorePart} · {drSubmitted}/{drTotal} done
+      </span>
+    );
+  }
+  if (t === "MANAGER") {
+    return <span className="text-xs text-[#64748b]">Visible after you submit</span>;
+  }
+  if (t === "PEER") {
+    return <span className="text-xs text-[#94a3b8]">—</span>;
+  }
+  return <span className="text-xs text-[#94a3b8]">—</span>;
+}
+
+function ActionButton({ row }: { row: TaskRow }) {
+  const p = taskProgressLabel(row);
+  if (p === "Completed") {
+    return (
+      <Link
+        href={row.href}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-[#dde5f5] bg-white px-4 py-2 text-[11px] font-semibold text-[#64748b] transition-colors hover:border-[#0f2044] hover:text-[#0f2044]"
+      >
+        View
+      </Link>
+    );
+  }
+  if (p === "In_Progress") {
+    return (
+      <Link
+        href={row.href}
+        className="inline-flex items-center gap-1.5 rounded-lg border-2 border-[#1D9E75] bg-white px-4 py-2 text-[11px] font-semibold text-[#1D9E75] transition-colors hover:bg-[#ecfdf5]"
+      >
+        Continue
+        <ChevronRight />
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href={row.href}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D9E75] px-4 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-[#178f6a]"
+    >
+      Start review
+      <ChevronRight />
+    </Link>
+  );
+}
+
+/** Average of available 1–5 type means (self, peer, direct_report, manager); null if none. */
+function aggregateScoreFromResultRow(row: FeedbackCycleResultRow): number | null {
+  const parts: number[] = [];
+  if (row.self?.avg != null) parts.push(row.self.avg);
+  if (row.peer?.avg != null) parts.push(row.peer.avg);
+  if (row.direct_report?.avg != null) parts.push(row.direct_report.avg);
+  if (row.manager?.avg != null) parts.push(row.manager.avg);
+  if (parts.length === 0) return null;
+  return parts.reduce((a, b) => a + b, 0) / parts.length;
+}
+
+function BreakdownCell({
+  label,
+  entry,
+  completion,
+}: {
+  label: string;
+  entry: { avg: number } | null | undefined;
+  completion: { total: number; submitted: number };
+}) {
+  const scoreLabel = formatScoreOutOf10(entry?.avg ?? null);
+  const pct = completion.total > 0 ? (completion.submitted / completion.total) * 100 : 0;
+  return (
+    <div className="rounded-xl border border-[#f0f4ff] bg-[#f8faff] p-3">
+      <p className="mb-1 text-[10px] font-medium text-[#94a3b8]">{label}</p>
+      <p className="text-sm font-semibold text-[#0f2044]">{scoreLabel}</p>
+      <p className="mt-0.5 text-[10px] text-[#64748b]">
+        {completion.submitted}/{completion.total} submitted
+      </p>
+      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#e8edf8]">
+        <div className="h-full rounded-full bg-[#1D9E75]" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+interface FeedbackCycle {
+  id: string;
+  cycle_name: string;
+  end_date: string | null;
   status: string;
-  otherReviewers: Array<{ name: string; reviewType: string }>;
 }
 
 interface ClosedCycleRow {
@@ -255,9 +283,9 @@ export default async function FeedbackPage() {
   const user = await getCurrentUser();
   if (!user?.id) {
     return (
-      <div className="w-full px-7 py-6">
-        <div className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] p-5">
-          <p className="text-[13px] text-[#8a97b8]">Please sign in to view 360 Feedback.</p>
+      <div className="w-full bg-[#f0f4ff] px-7 py-6">
+        <div className="rounded-2xl border border-[#dde5f5] bg-white p-5">
+          <p className="text-sm text-[#94a3b8]">Please sign in to view 360 Feedback.</p>
         </div>
       </div>
     );
@@ -278,156 +306,121 @@ export default async function FeedbackPage() {
   }
 
   const participantCycles = await getParticipantFeedbackDashboard(user.employee_id ?? null);
-  const participantActive = participantCycles.filter((c) => c.status === "Active");
   const participantClosed = participantCycles.filter((c) => c.status === "Closed");
   const draftCycles = allCycles.filter((c) => c.status === "Draft");
 
-  // ----- My cycles: build rows with reviewers per cycle -----
-  let myCycles: MyCycleRow[] = [];
-  if (participantActive.length > 0 && user.employee_id) {
-    const cycleIds = participantActive.map((c) => c.cycle_id);
-    const { data: cycleVisibility } = await supabase
-      .from("feedback_cycle")
-      .select("id, peer_feedback_visible_to_reviewee, direct_report_feedback_visible_to_reviewee")
-      .in("id", cycleIds);
-    const visibilityByCycleId = new Map(
-      (cycleVisibility ?? []).map((c) => [
-        c.id,
-        {
-          peerVisible: c.peer_feedback_visible_to_reviewee !== false,
-          directReportVisible: c.direct_report_feedback_visible_to_reviewee !== false,
-        },
-      ])
-    );
+  const employeeId = user.employee_id;
+  const activeCycleIds = activeCycles.map((c) => c.id);
 
-    const { data: reviewerRows } = await supabase
-      .from("feedback_reviewer")
-      .select("id, cycle_id, reviewer_employee_id, reviewer_type, status")
-      .eq("participant_employee_id", user.employee_id)
-      .in("cycle_id", cycleIds);
+  /** All assignments (including completed) for tasks table + team detection */
+  let allTaskRows: TaskRow[] = [];
+  const responseCountByReviewer = new Map<string, number>();
 
-    const reviewerIds = [...new Set((reviewerRows ?? []).map((r) => r.reviewer_employee_id))];
-    const { data: employees } = await supabase
-      .from("employees")
-      .select("employee_id, full_name")
-      .in("employee_id", reviewerIds);
-    const nameById = new Map((employees ?? []).map((e) => [e.employee_id, e.full_name ?? null]));
-
-    const reviewersByCycle = new Map<string, typeof reviewerRows>();
-    for (const r of reviewerRows ?? []) {
-      const list = reviewersByCycle.get(r.cycle_id) ?? [];
-      list.push(r);
-      reviewersByCycle.set(r.cycle_id, list);
-    }
-
-    myCycles = participantActive.map((c) => {
-      const vis = visibilityByCycleId.get(c.cycle_id) ?? { peerVisible: true, directReportVisible: true };
-      const revs = reviewersByCycle.get(c.cycle_id) ?? [];
-      const allReviewers = revs.map((r) => ({
-        id: r.id,
-        name: nameById.get(r.reviewer_employee_id) ?? r.reviewer_employee_id,
-        reviewType: (r.reviewer_type as string) ?? "—",
-        status: r.status === "Submitted" ? "SUBMITTED" : "PENDING",
-      }));
-      const reviewers = allReviewers.filter((r) => {
-        if (r.reviewType === "PEER") return vis.peerVisible;
-        if (r.reviewType === "DIRECT_REPORT") return vis.directReportVisible;
-        return true;
-      });
-      const othersOnly = allReviewers.filter((r) => r.reviewType !== "SELF");
-      const reviewerProgress = {
-        submitted: othersOnly.filter((r) => r.status === "SUBMITTED" || r.status === "COMPLETED").length,
-        total: othersOnly.length,
-      };
-      const selfStatus = c.self_status === "Submitted" ? "SUBMITTED" : "PENDING";
-      return {
-        id: c.cycle_id,
-        name: c.cycle_name,
-        cycleLabel: c.cycle_name,
-        type: "ANNUAL",
-        dueDate: c.end_date,
-        selfStatus,
-        reviewers,
-        reviewerProgress,
-        overall360Score: c.overall_360_score ?? null,
-        managerFeedbackSubmitted: !!c.manager_feedback_submitted,
-      };
-    });
-  }
-
-  // ----- Pending reviews + department + otherReviewers -----
-  let pendingReviews: PendingReviewRow[] = [];
-  if (user.employee_id && activeCycles.length > 0) {
-    const activeCycleIds = activeCycles.map((c) => c.id);
+  if (employeeId && activeCycleIds.length > 0) {
     const { data: myReviewerRows } = await supabase
       .from("feedback_reviewer")
       .select("id, cycle_id, participant_employee_id, reviewer_type, status")
-      .eq("reviewer_employee_id", user.employee_id)
-      .in("cycle_id", activeCycleIds)
-      .neq("status", "Submitted");
+      .eq("reviewer_employee_id", employeeId)
+      .in("cycle_id", activeCycleIds);
 
     if (myReviewerRows?.length) {
       const cycleIds = [...new Set(myReviewerRows.map((r) => r.cycle_id))];
       const participantIds = [...new Set(myReviewerRows.map((r) => r.participant_employee_id))];
-      const { data: cycleRows } = await supabase
-        .from("feedback_cycle")
-        .select("id, cycle_name, end_date")
-        .in("id", cycleIds);
-      const { data: employees } = await supabase
-        .from("employees")
-        .select("employee_id, full_name, department_name")
-        .in("employee_id", participantIds);
+      const reviewerRowIds = myReviewerRows.map((r) => r.id);
+
+      const [{ data: cycleRows }, { data: employees }, { data: respRows }] = await Promise.all([
+        supabase.from("feedback_cycle").select("id, cycle_name, end_date").in("id", cycleIds),
+        supabase.from("employees").select("employee_id, full_name, department_name").in("employee_id", participantIds),
+        supabase.from("feedback_response").select("reviewer_id").in("reviewer_id", reviewerRowIds),
+      ]);
+
+      for (const x of respRows ?? []) {
+        const id = x.reviewer_id as string;
+        responseCountByReviewer.set(id, (responseCountByReviewer.get(id) ?? 0) + 1);
+      }
 
       const cycleById = new Map((cycleRows ?? []).map((c) => [c.id, c]));
       const empById = new Map((employees ?? []).map((e) => [e.employee_id, e]));
 
-      // Other reviewers per (cycle_id, participant_employee_id): same cycle+participant, reviewer != me
-      const uniquePairs = Array.from(
-        new Map(myReviewerRows.map((r) => [`${r.cycle_id}:${r.participant_employee_id}`, r])).values()
-      );
-      const otherByKey = new Map<string, Array<{ name: string; reviewType: string }>>();
-      for (const r of uniquePairs) {
-        const key = `${r.cycle_id}:${r.participant_employee_id}`;
-        const { data: others } = await supabase
-          .from("feedback_reviewer")
-          .select("reviewer_employee_id, reviewer_type")
-          .eq("cycle_id", r.cycle_id)
-          .eq("participant_employee_id", r.participant_employee_id)
-          .neq("reviewer_employee_id", user.employee_id!);
-        const otherIds = [...new Set((others ?? []).map((o) => o.reviewer_employee_id))];
-        const { data: otherEmps } = otherIds.length
-          ? await supabase.from("employees").select("employee_id, full_name").in("employee_id", otherIds)
-          : { data: [] };
-        const otherNames = new Map((otherEmps ?? []).map((e) => [e.employee_id, e.full_name ?? null]));
-        otherByKey.set(
-          key,
-          (others ?? []).map((o) => ({
-            name: otherNames.get(o.reviewer_employee_id) ?? o.reviewer_employee_id,
-            reviewType: (o.reviewer_type as string) ?? "—",
-          }))
-        );
-      }
-
-      pendingReviews = myReviewerRows.map((r) => {
+      allTaskRows = myReviewerRows.map((r) => {
         const cycle = cycleById.get(r.cycle_id);
         const emp = empById.get(r.participant_employee_id);
-        const key = `${r.cycle_id}:${r.participant_employee_id}`;
         return {
           id: r.id,
           cycleId: r.cycle_id,
-          cycleLabel: cycle?.cycle_name ?? "—",
+          href: `/feedback/cycles/${r.cycle_id}/review/${r.id}`,
           participantName: emp?.full_name ?? r.participant_employee_id,
+          participantEmployeeId: r.participant_employee_id,
           department: emp?.department_name ?? "—",
           reviewType: (r.reviewer_type as string) ?? "—",
           dueDate: cycle?.end_date ?? null,
-          status: "PENDING",
-          otherReviewers: otherByKey.get(key) ?? [],
+          reviewerStatus: String(r.status ?? "Pending"),
+          savedResponseCount: responseCountByReviewer.get(r.id) ?? 0,
         };
+      });
+
+      const order = (t: string) => (t === "MANAGER" ? 0 : t === "DIRECT_REPORT" ? 1 : t === "PEER" ? 2 : 9);
+      allTaskRows.sort((a, b) => {
+        if (a.cycleId !== b.cycleId) return a.cycleId.localeCompare(b.cycleId);
+        const d = order(a.reviewType) - order(b.reviewType);
+        if (d !== 0) return d;
+        return a.participantName.localeCompare(b.participantName);
       });
     }
   }
 
-  // ----- Closed cycles (participant only) -----
+  /** Hero: SELF row per active cycle where user participates */
+  type HeroBlock = {
+    cycle: FeedbackCycle;
+    selfHref: string;
+    overallAvg: number | null;
+    completionByType: Awaited<ReturnType<typeof getReviewerCompletionByType>>;
+    resultSelf: FeedbackCycleResultRow | null;
+    submittedRatio: number;
+  };
+
+  const heroBlocks: HeroBlock[] = [];
+  if (employeeId) {
+    for (const cycle of activeCycles) {
+      const { data: selfRow } = await supabase
+        .from("feedback_reviewer")
+        .select("id")
+        .eq("cycle_id", cycle.id)
+        .eq("participant_employee_id", employeeId)
+        .eq("reviewer_type", "SELF")
+        .maybeSingle();
+
+      if (!selfRow?.id) continue;
+
+      const [overallAvg, completionByType, resultsPayload] = await Promise.all([
+        getParticipantOverallAverageSubmitted(supabase, cycle.id, employeeId),
+        getReviewerCompletionByType(supabase, cycle.id, employeeId),
+        getFeedbackCycleResultsForViewer(supabase, cycle.id, employeeId),
+      ]);
+
+      const resultSelf = resultsPayload?.results.find((r) => r.employee_id === employeeId) ?? null;
+
+      const { data: allRev } = await supabase
+        .from("feedback_reviewer")
+        .select("status")
+        .eq("cycle_id", cycle.id)
+        .eq("participant_employee_id", employeeId);
+
+      const totalR = (allRev ?? []).length;
+      const subR = (allRev ?? []).filter((x) => x.status === "Submitted").length;
+      const submittedRatio = totalR > 0 ? subR / totalR : 0;
+
+      heroBlocks.push({
+        cycle,
+        selfHref: `/feedback/cycles/${cycle.id}/review/${selfRow.id}`,
+        overallAvg,
+        completionByType,
+        resultSelf,
+        submittedRatio,
+      });
+    }
+  }
+
   const closedCycles: ClosedCycleRow[] = participantClosed.map((c) => ({
     id: c.cycle_id,
     name: c.cycle_name,
@@ -436,233 +429,453 @@ export default async function FeedbackPage() {
     closedDate: c.end_date,
   }));
 
+  /** Preload results + completion per cycle for task table */
+  const resultsByCycleId = new Map<string, Awaited<ReturnType<typeof getFeedbackCycleResultsForViewer>>>();
+  const completionByParticipant = new Map<string, Awaited<ReturnType<typeof getReviewerCompletionByType>>>();
+
+  if (employeeId) {
+    for (const c of activeCycles) {
+      const payload = await getFeedbackCycleResultsForViewer(supabase, c.id, employeeId);
+      resultsByCycleId.set(c.id, payload);
+      const pids = new Set<string>();
+      for (const r of allTaskRows) {
+        if (r.cycleId === c.id) pids.add(r.participantEmployeeId);
+      }
+      for (const pid of pids) {
+        const key = `${c.id}:${pid}`;
+        completionByParticipant.set(key, await getReviewerCompletionByType(supabase, c.id, pid));
+      }
+    }
+  }
+
+  /**
+   * Team rows per cycle: your team = participants you are assigned to review as MANAGER.
+   */
+  type TeamRow = {
+    cycleId: string;
+    employeeId: string;
+    name: string;
+    department: string | null;
+    /** 1–5 aggregate from result buckets; null if no submitted scores yet */
+    aggregateAvg1to5: number | null;
+    submitted: number;
+    total: number;
+    status: "Completed" | "In_progress" | "Pending";
+    riskKind: "low_response" | "done" | "on_track";
+  };
+
+  const teamByCycle = new Map<string, TeamRow[]>();
+  if (employeeId) {
+    for (const c of activeCycles) {
+      const { data: managerRows } = await supabase
+        .from("feedback_reviewer")
+        .select("participant_employee_id, status")
+        .eq("cycle_id", c.id)
+        .eq("reviewer_employee_id", employeeId)
+        .eq("reviewer_type", "MANAGER");
+
+      const teamMemberIds = [
+        ...new Set((managerRows ?? []).map((r) => r.participant_employee_id as string)),
+      ];
+      if (teamMemberIds.length === 0) continue;
+
+      const teamPayload = await buildCycleResultsForEmployees(supabase, c.id, teamMemberIds);
+      const resultByEmp = new Map(teamPayload.results.map((r) => [r.employee_id, r]));
+
+      const { data: revRows } = await supabase
+        .from("feedback_reviewer")
+        .select("participant_employee_id, status")
+        .eq("cycle_id", c.id)
+        .in("participant_employee_id", teamMemberIds);
+
+      const revStats = new Map<string, { total: number; submitted: number }>();
+      for (const pid of teamMemberIds) {
+        revStats.set(pid, { total: 0, submitted: 0 });
+      }
+      for (const r of revRows ?? []) {
+        const pid = r.participant_employee_id as string;
+        const s = revStats.get(pid);
+        if (!s) continue;
+        s.total += 1;
+        if (r.status === "Submitted") s.submitted += 1;
+      }
+
+      const { data: emps } = await supabase
+        .from("employees")
+        .select("employee_id, full_name, department_name")
+        .in("employee_id", teamMemberIds);
+
+      const empMap = new Map((emps ?? []).map((e) => [e.employee_id, e]));
+
+      const rows: TeamRow[] = [];
+      for (const pid of teamMemberIds) {
+        const st = revStats.get(pid) ?? { total: 0, submitted: 0 };
+        const { total, submitted } = st;
+        let status: TeamRow["status"] = "Pending";
+        if (total > 0 && submitted >= total) status = "Completed";
+        else if (submitted > 0) status = "In_progress";
+
+        const ratio = total > 0 ? submitted / total : 0;
+        let riskKind: TeamRow["riskKind"] = "on_track";
+        if (c.status === "Active" && total > 0 && ratio < 0.4) riskKind = "low_response";
+        else if (total > 0 && submitted === total) riskKind = "done";
+
+        const res = resultByEmp.get(pid);
+        const aggregateAvg1to5 = res ? aggregateScoreFromResultRow(res) : null;
+
+        const emp = empMap.get(pid);
+        rows.push({
+          cycleId: c.id,
+          employeeId: pid,
+          name: emp?.full_name ?? pid,
+          department: emp?.department_name ?? null,
+          aggregateAvg1to5,
+          submitted,
+          total,
+          status,
+          riskKind,
+        });
+      }
+      rows.sort((a, b) => a.name.localeCompare(b.name));
+      teamByCycle.set(c.id, rows);
+    }
+  }
+
+  const teamMemberIds = [
+    ...new Set([...teamByCycle.values()].flatMap((rows) => rows.map((r) => r.employeeId))),
+  ];
+
+  const overallOutOf10 = (avg: number | null) => {
+    if (avg == null) return "—";
+    const s = scoreOutOf10(avg);
+    return s != null ? `${s.toFixed(1)}/10` : "—";
+  };
+
   return (
-    <div className="w-full px-7 py-6 space-y-6">
-      <div className="mb-6">
-        <h1 className="font-['Sora'] text-[20px] font-bold text-[#0f1f3d]">My 360 feedback</h1>
-        <p className="text-[12px] text-[#8a97b8] mt-1">
-          Track your cycle progress and complete feedback assigned to you
+    <div className="min-h-screen w-full bg-[#f0f4ff] px-7 py-6">
+      <div className="mb-8">
+        <h1 className="text-xl font-semibold text-[#0f2044]">My 360 reviews</h1>
+        <p className="mt-1 text-sm text-[#94a3b8]">
+          Complete feedback assigned to you and track your own review progress
         </p>
       </div>
 
       {error && (
-        <div className="rounded-[14px] border border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[13px] text-[#b91c1c]">
+        <div className="mb-6 rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-sm text-[#b91c1c]">
           {error.message}
         </div>
       )}
 
-      {/* Section 1 — My cycles table */}
-      <div className="mb-5">
-        <SectionHeader
-          icon={<Icon360 />}
-          iconBg="bg-[#f5f3ff]"
-          iconBorder="border-[#ddd6fe]"
-          title="My cycles"
-          subtitle="Your own appraisals — see who is reviewing you and their progress"
-          count={myCycles.length}
-          countStyle="bg-[#f5f3ff] border-[#ddd6fe] text-[#6d28d9]"
-        />
-        <div className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-[#f8faff]">
-                {["Cycle", "Period", "Type", "Reviewers assigned", "Reviewer progress", "Overall score", "My status", ""].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[.06em] text-[#8a97b8] whitespace-nowrap border-b border-[#dde5f5]"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {myCycles.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-[12px] text-[#8a97b8]">
-                    No active cycles — when you are added to a cycle it will appear here
-                  </td>
-                </tr>
-              ) : (
-                myCycles.map((cycle) => {
-                  const { submitted, total } = cycle.reviewerProgress;
-                  const pct = total > 0 ? Math.round((submitted / total) * 100) : 0;
-                  const reviewersForStack = cycle.reviewers
-                    .filter((r) => r.reviewType !== "SELF")
-                    .map((r) => ({ name: r.name, reviewType: r.reviewType }));
+      {/* Section 1 — Your review hero */}
+      {heroBlocks.map((h) => {
+        const rs = h.resultSelf;
+        const canViewFull = h.submittedRatio >= 0.5;
+        return (
+          <div
+            key={h.cycle.id}
+            className="mb-8 rounded-2xl border border-[#dde5f5] bg-white p-6 shadow-sm"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-[#94a3b8]">Your review</p>
+                <h2 className="mt-1 text-lg font-semibold text-[#0f2044]">{h.cycle.cycle_name}</h2>
+                <p className="mt-1 text-sm text-[#94a3b8]">Due {formatDate(h.cycle.end_date)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-[#94a3b8]">Overall (submitted items)</p>
+                <p className="text-xl font-semibold text-[#0f2044]">{overallOutOf10(h.overallAvg)}</p>
+              </div>
+            </div>
 
-                  return (
-                    <tr
-                      key={cycle.id}
-                      className="border-t border-[#dde5f5] hover:bg-[#f8faff] transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-[8px] bg-[#f5f3ff] border border-[#ddd6fe] flex items-center justify-center flex-shrink-0">
-                            <Icon360Small />
-                          </div>
-                          <div>
-                            <p className="text-[12px] font-semibold text-[#0f1f3d]">{cycle.name}</p>
-                            <p className="text-[10px] text-[#8a97b8]">Due {formatDate(cycle.dueDate)}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <CycleBadge label={cycle.cycleLabel} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <TypeBadge type={cycle.type} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <AvatarStack reviewers={reviewersForStack} totalAssigned={cycle.reviewerProgress.total} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-[3px] rounded-full bg-[#dde5f5] overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-[#0d9488]"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-[11px] text-[#8a97b8]">
-                            {submitted}/{total}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col">
-                          <span className="text-[12px] font-semibold text-[#0f1f3d]">
-                            {cycle.overall360Score != null ? cycle.overall360Score.toFixed(2) : "—"}
-                          </span>
-                          <span className="text-[10px] text-[#8a97b8]">
-                            {cycle.managerFeedbackSubmitted ? "Manager feedback included" : "Awaiting manager feedback"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={cycle.selfStatus} />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/feedback/cycles/${cycle.id}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-[#dde5f5] text-[11px] font-semibold text-[#4a5a82] hover:border-[#0f1f3d] hover:text-[#0f1f3d] transition-colors"
-                        >
-                          Open
-                          <ChevronRight />
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <BreakdownCell
+                label="Manager"
+                entry={rs?.manager ?? null}
+                completion={h.completionByType.MANAGER}
+              />
+              <BreakdownCell
+                label="Peers"
+                entry={rs?.peer ?? null}
+                completion={h.completionByType.PEER}
+              />
+              <BreakdownCell
+                label="Direct reports"
+                entry={rs?.direct_report ?? null}
+                completion={h.completionByType.DIRECT_REPORT}
+              />
+              <BreakdownCell
+                label="Self"
+                entry={rs?.self ?? null}
+                completion={h.completionByType.SELF}
+              />
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href={h.selfHref}
+                className="rounded-lg bg-[#1D9E75] px-4 py-2 text-sm font-medium text-white hover:bg-[#178f6a]"
+              >
+                View self-assessment
+              </Link>
+              {canViewFull ? (
+                <Link
+                  href={`/feedback/cycles/${h.cycle.id}/report`}
+                  className="rounded-lg border border-[#dde5f5] bg-white px-4 py-2 text-sm font-medium text-[#0f2044] hover:border-[#0f2044]"
+                >
+                  View full results
+                </Link>
+              ) : (
+                <span
+                  className="cursor-not-allowed rounded-lg border border-[#e8edf8] bg-[#f8faff] px-4 py-2 text-sm font-medium text-[#94a3b8]"
+                  title="Available when at least half of reviewers have submitted"
+                >
+                  View full results
+                </span>
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+          </div>
+        );
+      })}
 
-      {/* Section 2 — Reviews I need to complete */}
-      <div className="mb-5">
-        <SectionHeader
-          icon={<IconEdit />}
-          iconBg="bg-[#eff6ff]"
-          iconBorder="border-[#bfdbfe]"
-          title="Reviews I need to complete"
-          subtitle="Feedback you have been asked to give"
-          count={pendingReviews.length}
-          countStyle="bg-[#fffbeb] border-[#fcd34d] text-[#92400e]"
-        />
-        <div className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-[#f8faff]">
-                {["Employee", "Cycle", "Review type", "Also reviewing", "Due date", "Status", ""].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[.06em] text-[#8a97b8] whitespace-nowrap border-b border-[#dde5f5]"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {pendingReviews.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[12px] text-[#8a97b8]">
-                    No pending reviews — you&apos;re all caught up
-                  </td>
-                </tr>
-              ) : (
-                pendingReviews.map((review, idx) => (
-                  <tr
-                    key={review.id}
-                    className="border-t border-[#dde5f5] hover:bg-[#f8faff] transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0"
-                          style={{ background: AVATAR_COLORS[idx % AVATAR_COLORS.length] }}
-                        >
-                          {getInitials(review.participantName)}
-                        </div>
-                        <div>
-                          <p className="text-[12px] font-semibold text-[#0f1f3d]">{review.participantName}</p>
-                          <p className="text-[10px] text-[#8a97b8]">{review.department}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <CycleBadge label={review.cycleLabel} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <TypeBadge type={review.reviewType} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <AvatarStack reviewers={review.otherReviewers} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-[12px] text-[#4a5a82]">{formatDate(review.dueDate)}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={review.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/feedback/cycles/${review.cycleId}/review/${review.id}`}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] bg-[#0d9488] text-white text-[11px] font-semibold hover:bg-[#0f766e] transition-colors"
+      {/* Section 2 — Reviews to complete (per cycle) */}
+      {activeCycles.map((cycle) => {
+        const tasks = allTaskRows.filter((r) => r.cycleId === cycle.id && r.reviewType !== "SELF");
+        if (tasks.length === 0) return null;
+
+        const pendingCount = tasks.filter((t) => taskProgressLabel(t) !== "Completed").length;
+        const total = tasks.length;
+        const completed = tasks.filter((t) => taskProgressLabel(t) === "Completed").length;
+        const payload = resultsByCycleId.get(cycle.id);
+        const weightedMap = payload?.weighted_overall ?? {};
+
+        return (
+          <div key={`tasks-${cycle.id}`} className="mb-8">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-[#0f2044]">Reviews I need to complete</span>
+                <span className="rounded-full border border-[#dde5f5] bg-white px-2 py-0.5 text-xs text-[#64748b]">
+                  {pendingCount} pending
+                </span>
+              </div>
+              <span className="text-xs text-[#94a3b8]">
+                {cycle.cycle_name} · Due {formatDate(cycle.end_date)}
+              </span>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-[#dde5f5] bg-white shadow-sm">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#f8faff]">
+                    {["Employee", "Relationship", "Score visible", "My progress", "Action"].map((col) => (
+                      <th
+                        key={col}
+                        className="border-b border-[#f0f4ff] px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#94a3b8]"
                       >
-                        Start review
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <polyline points="9 18 15 12 9 6" />
-                        </svg>
-                      </Link>
-                    </td>
+                        {col}
+                      </th>
+                    ))}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {tasks.map((row, idx) => {
+                    const compKey = `${cycle.id}:${row.participantEmployeeId}`;
+                    const comp = completionByParticipant.get(compKey);
+                    const drSubmitted = comp
+                      ? comp.MANAGER.submitted +
+                        comp.PEER.submitted +
+                        comp.DIRECT_REPORT.submitted +
+                        comp.SELF.submitted
+                      : 0;
+                    const drTotal = comp
+                      ? comp.MANAGER.total + comp.PEER.total + comp.DIRECT_REPORT.total + comp.SELF.total
+                      : 0;
 
-      {/* Section 3 — Completed cycles */}
-      <div className="mb-5">
-        <SectionHeader
-          icon={<IconCheck />}
-          iconBg="bg-[#f8faff]"
-          iconBorder="border-[#dde5f5]"
-          title="Completed cycles"
-          subtitle="Your closed feedback reports"
-        />
-        <div className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden">
+                    return (
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#f0f4ff] transition-colors hover:bg-[#fafbff]"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                              style={{ background: AVATAR_COLORS[idx % AVATAR_COLORS.length] }}
+                            >
+                              {getInitials(row.participantName)}
+                            </div>
+                            <div>
+                              <p className="text-[12px] font-semibold text-[#0f2044]">{row.participantName}</p>
+                              <p className="text-[10px] text-[#94a3b8]">{row.department}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <RelationshipPill type={row.reviewType} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <ScoreVisibleCell
+                            row={row}
+                            weightedOverall={weightedMap[row.participantEmployeeId] ?? null}
+                            drSubmitted={drSubmitted}
+                            drTotal={drTotal}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <MyProgressCell row={row} />
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <ActionButton row={row} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="flex gap-5 border-t border-[#f0f4ff] bg-[#f8faff] px-4 py-2.5 text-xs text-[#94a3b8]">
+                <span>
+                  Assigned: <strong className="text-[#0f2044]">{total}</strong>
+                </span>
+                <span>
+                  Completed: <strong className="text-[#16a34a]">{completed}</strong>
+                </span>
+                <span>
+                  Remaining: <strong className="text-[#d97706]">{total - completed}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {employeeId &&
+        activeCycles.length > 0 &&
+        allTaskRows.filter((r) => r.reviewType !== "SELF").length === 0 &&
+        heroBlocks.length === 0 && (
+          <div className="mb-8 rounded-2xl border border-[#dde5f5] bg-white p-8 text-center text-sm text-[#94a3b8]">
+            No active review tasks in your current cycles.
+          </div>
+        )}
+
+      {/* Section 3 — Team (only when current user manages someone in the cycle as above) */}
+      {teamMemberIds.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-sm font-semibold text-[#0f2044]">Your team&apos;s reviews</h3>
+            <p className="mb-3 mt-1 text-xs text-[#94a3b8]">
+              People you manage — their 360 progress
+            </p>
+            {[...teamByCycle.entries()].map(([cycleId, teamRows]) => {
+              if (teamRows.length === 0) return null;
+              const cycle = activeCycles.find((c) => c.id === cycleId);
+              return (
+                <div key={cycleId} className="mb-6 last:mb-0">
+                  {activeCycles.length > 1 && cycle && (
+                    <p className="mb-2 text-xs text-[#94a3b8]">{cycle.cycle_name}</p>
+                  )}
+                  <div className="overflow-hidden rounded-2xl border border-[#dde5f5] bg-white shadow-sm">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="bg-[#f8faff]">
+                          {["Employee", "Score so far", "Reviewer progress", "Reviewers", "Status", "Risk"].map((h) => (
+                            <th
+                              key={h}
+                              className="border-b border-[#f0f4ff] px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#94a3b8]"
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamRows.map((tr, idx) => {
+                          const pct = tr.total > 0 ? (tr.submitted / tr.total) * 100 : 0;
+                          const s10 =
+                            tr.aggregateAvg1to5 != null ? scoreOutOf10(tr.aggregateAvg1to5) : null;
+                          const scoreLabel = s10 != null ? `${s10.toFixed(1)}/10` : "—";
+                          return (
+                            <tr
+                              key={tr.employeeId}
+                              className="border-b border-[#f0f4ff] transition-colors hover:bg-[#fafbff]"
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div
+                                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                                    style={{ background: AVATAR_COLORS[idx % AVATAR_COLORS.length] }}
+                                  >
+                                    {getInitials(tr.name)}
+                                  </div>
+                                  <div>
+                                    <p className="text-[12px] font-semibold text-[#0f2044]">{tr.name}</p>
+                                    {tr.department && (
+                                      <p className="text-[10px] text-[#94a3b8]">{tr.department}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-xs font-medium text-[#0f2044]">{scoreLabel}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex max-w-[140px] items-center gap-2">
+                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#e8edf8]">
+                                    <div
+                                      className="h-full rounded-full bg-[#1D9E75]"
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-[#64748b]">
+                                {tr.submitted}/{tr.total}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={cn(
+                                    "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                    tr.status === "Completed" &&
+                                      "border-emerald-200 bg-emerald-50 text-emerald-800",
+                                    tr.status === "In_progress" && "border-blue-200 bg-blue-50 text-blue-800",
+                                    tr.status === "Pending" && "border-amber-200 bg-amber-50 text-amber-800"
+                                  )}
+                                >
+                                  {tr.status === "In_progress"
+                                    ? "In progress"
+                                    : tr.status === "Completed"
+                                      ? "Completed"
+                                      : "Pending"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {tr.riskKind === "low_response" ? (
+                                  <span className="text-xs text-[#f59e0b]">⚠ Low response</span>
+                                ) : tr.riskKind === "done" ? (
+                                  <span className="text-xs font-medium text-[#16a34a]">Done</span>
+                                ) : (
+                                  <span className="text-xs text-[#64748b]">On track</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+      {/* Completed cycles */}
+      <div className="mb-8">
+        <h3 className="mb-3 text-sm font-semibold text-[#0f2044]">Completed cycles</h3>
+        <p className="mb-3 text-xs text-[#94a3b8]">Your closed feedback reports</p>
+        <div className="overflow-hidden rounded-2xl border border-[#dde5f5] bg-white shadow-sm">
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-[#f8faff]">
                 {["Cycle", "Period", "Type", "Closed", "Status", ""].map((h) => (
                   <th
                     key={h}
-                    className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[.06em] text-[#8a97b8] whitespace-nowrap border-b border-[#dde5f5]"
+                    className="border-b border-[#f0f4ff] px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#94a3b8]"
                   >
                     {h}
                   </th>
@@ -672,7 +885,7 @@ export default async function FeedbackPage() {
             <tbody>
               {closedCycles.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-[12px] text-[#8a97b8]">
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-[#94a3b8]">
                     No completed cycles yet — reports will appear here once cycles close
                   </td>
                 </tr>
@@ -680,27 +893,27 @@ export default async function FeedbackPage() {
                 closedCycles.map((cycle) => (
                   <tr
                     key={cycle.id}
-                    className="border-t border-[#dde5f5] hover:bg-[#f8faff] transition-colors"
+                    className="border-b border-[#f0f4ff] transition-colors hover:bg-[#fafbff]"
                   >
                     <td className="px-4 py-3">
-                      <p className="text-[12px] font-semibold text-[#0f1f3d]">{cycle.name}</p>
+                      <p className="text-[12px] font-semibold text-[#0f2044]">{cycle.name}</p>
                     </td>
                     <td className="px-4 py-3">
                       <CycleBadge label={cycle.cycleLabel} />
                     </td>
                     <td className="px-4 py-3">
-                      <TypeBadge type={cycle.type} />
+                      <TypeBadgeClosed type={cycle.type} />
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[12px] text-[#4a5a82]">{formatDate(cycle.closedDate)}</span>
+                      <span className="text-[12px] text-[#64748b]">{formatDate(cycle.closedDate)}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status="COMPLETED" />
+                      <CompletedStatusBadge />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/feedback/cycles/${cycle.id}/report`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-[#dde5f5] text-[11px] font-semibold text-[#4a5a82] hover:border-[#0f1f3d] hover:text-[#0f1f3d] transition-colors"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#dde5f5] px-3 py-1.5 text-[11px] font-semibold text-[#64748b] transition-colors hover:border-[#0f2044] hover:text-[#0f2044]"
                       >
                         View report
                         <ChevronRight />
@@ -715,7 +928,7 @@ export default async function FeedbackPage() {
       </div>
 
       {draftCycles.length > 0 && (
-        <p className="text-[12px] text-[#8a97b8]">
+        <p className="text-sm text-[#94a3b8]">
           {draftCycles.length} draft cycle(s) will appear here once activated by HR.
         </p>
       )}

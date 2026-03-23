@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
-import { computeAggregatedScore } from "@/lib/feedback-score";
+import { computeOthersAggregateMetrics } from "@/lib/feedback-score";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -131,7 +131,7 @@ export async function GET(
 
     const weightedByParticipant: Record<string, number | null> = {};
     for (const employee_id of participantIds) {
-      const score = await computeAggregatedScore(supabase, cycleId, employee_id);
+      const score = await computeOthersAggregateMetrics(supabase, cycleId, employee_id);
       weightedByParticipant[employee_id] = score.overall;
     }
 

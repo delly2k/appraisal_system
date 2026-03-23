@@ -279,6 +279,31 @@ export function ActionButton({
     <button
       onClick={onClick}
       disabled={disabled}
+      onMouseEnter={(e) => {
+        if (disabled) return;
+        if (variant === "primary") {
+          e.currentTarget.style.filter = "brightness(1.05)";
+        } else if (variant === "danger") {
+          e.currentTarget.style.background = "#ffe4e6";
+          e.currentTarget.style.borderColor = "#fda4af";
+        } else {
+          e.currentTarget.style.background = "#f8fafc";
+          e.currentTarget.style.borderColor = "#cfd9ee";
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.filter = "";
+        if (variant === "primary") {
+          e.currentTarget.style.background = "linear-gradient(135deg, #3b82f6, #1d4ed8)";
+          e.currentTarget.style.borderColor = "transparent";
+        } else if (variant === "danger") {
+          e.currentTarget.style.background = "#fff1f2";
+          e.currentTarget.style.borderColor = "#fecdd3";
+        } else {
+          e.currentTarget.style.background = "white";
+          e.currentTarget.style.borderColor = "#dde5f5";
+        }
+      }}
       style={{
         display: "inline-flex",
         alignItems: "center",

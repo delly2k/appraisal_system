@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, X } from "lucide-react";
+import { Calendar, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AssignReviewerModal } from "@/components/feedback/AssignReviewerModal";
 
@@ -61,12 +61,6 @@ interface EligibleEmployee {
   department_name?: string | null;
 }
 
-const Feedback360Icon = () => (
-  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-  </svg>
-);
-
 /** Deterministic soft background from string (e.g. employee id or name) */
 function avatarColor(id: string): string {
   let n = 0;
@@ -123,6 +117,44 @@ function reviewerChipColor(status: string): string {
 }
 
 const AVATAR_COLORS = ["#4f46e5", "#f59e0b", "#ef4444", "#10b981", "#3b82f6", "#8b5cf6"];
+
+/** Row-level aggregate from reviewer rows */
+function aggregateParticipantStatus(p: ParticipantAssignment): "Completed" | "In Progress" | "Pending" {
+  const reviewers = p.reviewers ?? [];
+  if (reviewers.length === 0) return "Pending";
+  const norm = (s: string) => (s || "").toLowerCase().replace(/\s+/g, " ");
+  const isDone = (r: AssignmentReviewer) => {
+    const t = norm(r.status);
+    return t === "completed" || t === "submitted";
+  };
+  const isInProgress = (r: AssignmentReviewer) => {
+    const t = norm(r.status);
+    return t === "in progress" || t === "in_progress";
+  };
+  if (reviewers.every(isDone)) return "Completed";
+  if (reviewers.some(isDone) || reviewers.some(isInProgress)) return "In Progress";
+  return "Pending";
+}
+
+function ParticipantRowStatusPill({ status }: { status: "Completed" | "In Progress" | "Pending" }) {
+  const cfg =
+    status === "Completed"
+      ? { dot: "bg-[#16a34a]", cls: "bg-[#dcfce7] text-[#16a34a]" }
+      : status === "In Progress"
+        ? { dot: "bg-[#2563eb]", cls: "bg-[#dbeafe] text-[#2563eb]" }
+        : { dot: "bg-[#d97706]", cls: "bg-[#fef3c7] text-[#d97706]" };
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
+        cfg.cls
+      )}
+    >
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", cfg.dot)} />
+      {status}
+    </span>
+  );
+}
 
 function StatusPill({ status }: { status: string }) {
   const normalized = (status || "").toUpperCase().replace(/\s+/g, "_");
@@ -190,8 +222,7 @@ export default function Admin360Page() {
   const [participantsOverviewData, setParticipantsOverviewData] = useState<CycleAssignments | null>(null);
   const [participantsOverviewLoading, setParticipantsOverviewLoading] = useState(false);
 
-  /** Cycle cards: expanded cycle and cache of assignments + results per cycle */
-  const [expandedCycleId, setExpandedCycleId] = useState<string | null>(null);
+  /** Per-cycle assignments + results cache (flat tables load all cycles) */
   const [cycleDataCache, setCycleDataCache] = useState<Record<string, { assignments: CycleAssignments; results: CycleResults | null }>>({});
   const [cycleDataLoading, setCycleDataLoading] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -210,10 +241,8 @@ export default function Admin360Page() {
 
   /** Close cycle / reopen / remove response in progress */
   const [closeCycleLoading, setCloseCycleLoading] = useState<string | null>(null);
-  /** Initialize 360 participants (HR retry when auto-start missed) */
+  /** Initialize / re-seed 360 participants for one cycle */
   const [seed360Loading, setSeed360Loading] = useState<string | null>(null);
-  /** Batch initialize all non-Closed cycles with zero participants */
-  const [initializeAllLoading, setInitializeAllLoading] = useState(false);
   const [reopenLoading, setReopenLoading] = useState<string | null>(null);
   const [removeResponseLoading, setRemoveResponseLoading] = useState<string | null>(null);
 
@@ -249,10 +278,15 @@ export default function Admin360Page() {
     loadCycles();
   }, [loadCycles]);
 
-  const pending360Count = useMemo(
-    () => cycles.filter((c) => c.status !== "Closed" && (c.participant_count ?? 0) === 0).length,
-    [cycles]
-  );
+  /** Flat tables: prefetch assignments + results for every cycle (no expand step). */
+  useEffect(() => {
+    if (loading || cycles.length === 0) return;
+    for (const c of cycles) {
+      void loadCycleData(c.id, false);
+    }
+    // Intentionally depend on loading + cycles list only to avoid refetch loops when cache updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, cycles]);
 
   /** Fetch eligible reviewers for modal when participant and type are set */
   useEffect(() => {
@@ -382,18 +416,6 @@ export default function Admin360Page() {
     }
   }, [cycleDataCache]);
 
-  const toggleCycleExpand = useCallback(
-    async (cycleId: string) => {
-      if (expandedCycleId === cycleId) {
-        setExpandedCycleId(null);
-        return;
-      }
-      setExpandedCycleId(cycleId);
-      await loadCycleData(cycleId, false);
-    },
-    [expandedCycleId, loadCycleData]
-  );
-
   const openDetailModal = (cycleId: string, participant: ParticipantAssignment) => {
     setDetailCycleId(cycleId);
     setDetailParticipant(participant);
@@ -455,24 +477,27 @@ export default function Admin360Page() {
     refetch();
   };
 
-  const initialize360Cycle = async (cycleId: string) => {
+  const handleInitializeCycle = async (cycleId: string) => {
     setError(null);
     setSeed360Loading(cycleId);
     try {
-      const res = await fetch(`/api/admin/feedback/cycles/${cycleId}/activate`, { method: "POST" });
+      const res = await fetch(
+        `/api/admin/feedback/cycles/${cycleId}/activate?reseed=true`,
+        { method: "POST" }
+      );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? "Failed to initialize 360");
+        setError(data.error ?? "Failed to initialize cycle");
         return;
       }
-      if (data.alreadySeeded) {
-        showSuccess("360 already has participants.");
+      const created = typeof data.participantsCreated === "number" ? data.participantsCreated : 0;
+      const count = typeof data.participantCount === "number" ? data.participantCount : 0;
+      if (created > 0) {
+        showSuccess(`${created} manager(s) added as participants.`);
+      } else if (count > 0) {
+        showSuccess(`Cycle now has ${count} participant(s).`);
       } else {
-        showSuccess(
-          data.participantCount > 0
-            ? `360 initialized: ${data.participantCount} participant(s).`
-            : "360 activated; no eligible managers found in reporting lines."
-        );
+        setError("No managers found to seed from appraisals.");
       }
       setCycleDataCache((prev) => {
         const next = { ...prev };
@@ -480,48 +505,9 @@ export default function Admin360Page() {
         return next;
       });
       await loadCycles();
-      if (expandedCycleId === cycleId) {
-        await loadCycleData(cycleId, true);
-      }
+      await loadCycleData(cycleId, true);
     } finally {
       setSeed360Loading(null);
-    }
-  };
-
-  const initializeAllPending360 = async () => {
-    setError(null);
-    setInitializeAllLoading(true);
-    try {
-      const res = await fetch("/api/admin/feedback/cycles/activate-pending", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error ?? "Failed to initialize pending cycles");
-        return;
-      }
-      const results = (data.results ?? []) as Array<
-        | { ok: true; alreadySeeded: boolean; cycleName: string }
-        | { ok: false; cycleName: string; error: string }
-      >;
-      const failures = results.filter((r) => !r.ok);
-      if (failures.length > 0) {
-        setSuccess(null);
-        setError(failures.map((f) => `${f.cycleName}: ${f.error}`).join("; "));
-      } else if (data.processed === 0) {
-        showSuccess("No pending 360 cycles to initialize.");
-      } else {
-        const seeded = results.filter((r) => r.ok && !r.alreadySeeded).length;
-        const already = results.filter((r) => r.ok && r.alreadySeeded).length;
-        showSuccess(
-          `Initialized ${seeded} cycle(s); ${already} already had participants (${data.processed} total).`
-        );
-      }
-      setCycleDataCache({});
-      await loadCycles();
-      if (expandedCycleId) {
-        await loadCycleData(expandedCycleId, true);
-      }
-    } finally {
-      setInitializeAllLoading(false);
     }
   };
 
@@ -542,7 +528,6 @@ export default function Admin360Page() {
         delete next[cycleId];
         return next;
       });
-      if (expandedCycleId === cycleId) setExpandedCycleId(null);
     } finally {
       setCloseCycleLoading(null);
     }
@@ -673,49 +658,37 @@ export default function Admin360Page() {
   }, [participantsOverviewCycleId, assignmentsCycleId]);
 
   return (
-    <div style={{ animation: "fadeUp 0.4s ease both" }}>
-      <div style={{ marginBottom: "28px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "4px" }}>
-          <div
-            style={{
-              width: "42px",
-              height: "42px",
-              borderRadius: "12px",
-              background: "linear-gradient(135deg, #f3e8ff, #e9d5ff)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              color: "#7c3aed",
-            }}
-          >
-            <Feedback360Icon />
+    <div
+      className="min-h-screen bg-[#f0f4ff]"
+      style={{
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+        animation: "fadeUp 0.4s ease both",
+      }}
+    >
+      <div className="mx-auto max-w-7xl px-5 pb-12 pt-8 sm:px-6 lg:px-8">
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex gap-4 border-l-4 border-[#4ecca3] pl-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e6faf3] text-lg font-medium text-[#0f2044]">
+              ◎
+            </div>
+            <div>
+              <h1 className="text-[22px] font-semibold leading-tight text-[#0f2044]">360 Feedback Reviews</h1>
+              <p className="mt-0.5 text-[13px] text-[#64748b]">Track and manage multi-rater feedback cycles</p>
+            </div>
           </div>
-          <h1
-            className="font-display"
-            style={{
-              fontSize: "24px",
-              fontWeight: 700,
-              color: "#0f1f3d",
-              letterSpacing: "-0.02em",
-              margin: 0,
-            }}
-          >
-            All 360 Reviews
-          </h1>
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end">
+            <div className="relative w-full min-w-[260px] max-w-[320px] sm:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" aria-hidden />
+              <input
+                type="search"
+                placeholder="Search participants by name or department..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-xl border border-[#dde5f5] bg-white py-2.5 pl-10 pr-4 text-sm text-[#0f2044] outline-none transition focus:border-[#4ecca3] focus:ring-2 focus:ring-[#4ecca3]/20"
+              />
+            </div>
+          </div>
         </div>
-        <p
-          style={{
-            fontSize: "13.5px",
-            color: "#8a97b8",
-            marginTop: "2px",
-            paddingLeft: "56px",
-            margin: 0,
-          }}
-        >
-          View all 360 cycle results, participants, and assignments.
-        </p>
-      </div>
 
       {error && (
         <div
@@ -756,108 +729,40 @@ export default function Admin360Page() {
         </div>
       )}
 
-      {/* All 360 cycles & results — cycle cards, participants table, detail modal */}
-      <div
-        style={{
-          background: "white",
-          borderRadius: "14px",
-          border: "1px solid #dde5f5",
-          boxShadow: "0 2px 12px rgba(15,31,61,0.07), 0 0 1px rgba(15,31,61,0.1)",
-          overflow: "hidden",
-          marginBottom: "20px",
-        }}
-      >
-        <div
-          style={{
-            padding: "20px 24px 16px",
-            borderBottom: "1px solid #dde5f5",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div
-              style={{
-                width: "32px",
-                height: "32px",
-                borderRadius: "9px",
-                background: "#eff6ff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#3b82f6",
-              }}
-            >
-              <Feedback360Icon />
-            </div>
-            <div>
-              <div className="font-display" style={{ fontSize: "15px", fontWeight: 600, color: "#0f1f3d" }}>
-                All 360 cycles and results
+        {loading ? (
+          <div className="flex flex-col gap-6">
+            {[1, 2].map((card) => (
+              <div key={card} className="overflow-hidden rounded-2xl border border-[#e8edf8] bg-white shadow-sm">
+                <div className="h-16 animate-pulse bg-[#e2e8f0]" />
+                <div className="flex flex-col gap-2 p-5">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-14 animate-pulse rounded-lg bg-[#e2e8f0]" />
+                  ))}
+                </div>
               </div>
-              <div style={{ fontSize: "12px", color: "#8a97b8", marginTop: "1px" }}>
-                View aggregate results by participant for each cycle
-              </div>
-            </div>
+            ))}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <input
-              type="search"
-              placeholder="Search participants by name or department…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                padding: "8px 12px",
-                borderRadius: "8px",
-                border: "1px solid #dde5f5",
-                fontSize: "13px",
-                minWidth: "260px",
-                background: "#f8faff",
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => initializeAllPending360()}
-              disabled={initializeAllLoading || loading || pending360Count === 0}
-              title="Runs the same Initialize 360 action for every non-Closed cycle that has no participants yet"
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-[8px] border border-[#a78bfa] bg-[#ede9fe] text-[10px] font-semibold text-[#5b21b6] hover:bg-[#ddd6fe] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {initializeAllLoading ? "Initializing…" : `Initialize all pending (${pending360Count})`}
-            </button>
-          </div>
-        </div>
-
-        <div style={{ padding: "16px 24px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-          {loading ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: "72px",
-                    borderRadius: "12px",
-                    background: "#f1f5f9",
-                  }}
-                />
-              ))}
+        ) : cycles.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#e8edf8] text-3xl text-[#94a3b8]">
+              ◎
             </div>
-          ) : cycles.length === 0 ? (
-            <p style={{ textAlign: "center", fontSize: "13px", color: "#8a97b8", padding: "24px" }}>No 360 feedback cycles yet.</p>
-          ) : (
-            cycles.map((c) => {
+            <p className="text-base font-medium text-[#0f2044]">No 360 cycles yet</p>
+            <p className="mt-1 text-[13px] text-[#94a3b8]">Create a feedback cycle to get started</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-6">
+            {cycles.map((c) => {
               const cached = cycleDataCache[c.id];
               const assignments = cached?.assignments;
               const results = cached?.results;
-              const isExpanded = expandedCycleId === c.id;
-              const isLoading = cycleDataLoading === c.id;
+              const isCardLoading = cycleDataLoading === c.id || !cached;
               const participantCount = assignments?.participants?.length ?? 0;
               const allReviewers = assignments?.participants?.flatMap((p) => p.reviewers) ?? [];
               const completed = allReviewers.filter((r) => (r.status || "").toLowerCase() === "completed").length;
               const inProgress = allReviewers.filter((r) => (r.status || "").toLowerCase() === "in progress").length;
               const pending = allReviewers.filter((r) => (r.status || "").toLowerCase() === "pending").length;
-              const notStarted = allReviewers.length - completed - inProgress - pending;
+              const notStarted = Math.max(0, allReviewers.length - completed - inProgress - pending);
               const q = searchQuery.trim().toLowerCase();
               const filteredParticipants =
                 assignments?.participants.filter((p) => {
@@ -867,276 +772,267 @@ export default function Admin360Page() {
                   return name.includes(q) || dept.includes(q);
                 }) ?? [];
 
+              const hasParticipants = (c.participant_count ?? 0) > 0;
+
               return (
                 <div
                   key={c.id}
-                  className="bg-white border border-[#dde5f5] rounded-[14px] shadow-[0_2px_12px_rgba(15,31,61,0.07)] overflow-hidden mb-4"
+                  className="overflow-hidden rounded-2xl border border-[#e8edf8] bg-white shadow-sm"
                 >
-                  <div className="w-full flex items-center justify-between gap-4 px-5 py-4 border-b border-[#dde5f5] bg-[#f8faff]">
-                    <button
-                      type="button"
-                      onClick={() => toggleCycleExpand(c.id)}
-                      className="flex-1 flex items-center gap-3 min-w-0 text-left"
-                    >
-                      <div className="w-9 h-9 rounded-[10px] bg-[#f5f3ff] border border-[#ddd6fe] flex items-center justify-center flex-shrink-0">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
-                          <circle cx="12" cy="12" r="4" />
-                          <path d="M16 8v5a3 3 0 006 0v-1a10 10 0 10-3.92 7.94" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-display text-[14px] font-bold text-[#0f1f3d]">
-                            {c.cycle_name}
+                  <div className="flex flex-col gap-3 border-b border-[#e8edf8] bg-[#f8faff] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[15px] font-semibold text-[#0f2044]">
+                          <span className="mr-1 text-[#4ecca3]">●</span>
+                          {c.cycle_name}
+                        </span>
+                        {c.status === "Active" ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#dcfce7] px-2 py-0.5 text-xs font-semibold text-[#16a34a]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />
+                            Active
                           </span>
-                          {c.status === "Active" && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ecfdf5] border border-[#6ee7b7] text-[10px] font-semibold text-[#065f46]">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
-                              Active
-                            </span>
-                          )}
-                          {c.status !== "Active" && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f1f5f9] border border-[#e2e8f0] text-[10px] font-semibold text-[#64748b]">
-                              {c.status}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-[#8a97b8] mt-0.5">
-                          Due {formatDueDate(c.end_date)}
-                          {assignments != null && ` · ${participantCount} participant${participantCount !== 1 ? "s" : ""}`}
-                        </p>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f1f5f9] px-2 py-0.5 text-xs font-semibold text-[#64748b]">
+                            {c.status}
+                          </span>
+                        )}
                       </div>
-                    </button>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <input
-                        type="search"
-                        placeholder="Search participants..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="border border-[#dde5f5] rounded-[8px] px-3 py-2 text-[11px] w-[200px] outline-none bg-white focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/10"
-                      />
-                      {c.status !== "Closed" && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            initialize360Cycle(c.id);
-                          }}
-                          disabled={
-                            seed360Loading === c.id || (c.participant_count ?? 0) > 0
-                          }
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#a78bfa] bg-[#ede9fe] text-[10px] font-semibold text-[#5b21b6] hover:bg-[#ddd6fe] disabled:opacity-50"
-                          title={
-                            (c.participant_count ?? 0) > 0
-                              ? "Participants already created for this cycle"
-                              : "Use if 360 participants were not created when the appraisal cycle opened"
-                          }
-                        >
-                          {seed360Loading === c.id ? "Initializing…" : "Initialize 360"}
-                        </button>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#94a3b8]">
+                        <span className="inline-flex items-center gap-1">
+                          <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Due {formatDueDate(c.end_date)}
+                        </span>
+                        {assignments != null && (
+                          <span className="text-[#94a3b8]">
+                            · {participantCount} participant{participantCount !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                      {!isCardLoading && assignments != null && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-[#ccfbf1] px-2 py-0.5 text-xs font-semibold text-[#0f766e]">
+                            {completed} completed
+                          </span>
+                          <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-xs font-semibold text-[#2563eb]">
+                            {inProgress} in progress
+                          </span>
+                          <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-xs font-semibold text-[#d97706]">
+                            {pending + notStarted} pending
+                          </span>
+                        </div>
                       )}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                      {c.status !== "Closed" &&
+                        (seed360Loading === c.id ? (
+                          <div className="flex flex-col items-end gap-1.5">
+                            <button
+                              type="button"
+                              disabled
+                              className="flex h-8 cursor-not-allowed items-center gap-2 rounded-lg border border-[#1D9E75] bg-white px-3 text-xs font-medium text-[#1D9E75] opacity-80"
+                              aria-busy
+                            >
+                              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8v8z"
+                                />
+                              </svg>
+                              Initializing…
+                            </button>
+                            <div className="h-1 w-[140px] overflow-hidden rounded-full bg-[#e8edf8]">
+                              <div className="h-full w-full rounded-full bg-[#1D9E75] animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleInitializeCycle(c.id)}
+                            title={
+                              hasParticipants
+                                ? "Replace participants from managers in appraisals"
+                                : "Seed participants from managers in appraisals"
+                            }
+                            className={cn(
+                              "rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition",
+                              hasParticipants
+                                ? "border-2 border-[#4ecca3] bg-white text-[#4ecca3] hover:bg-[#4ecca3] hover:text-white"
+                                : "bg-[#4ecca3] text-white hover:bg-[#3db892]"
+                            )}
+                          >
+                            {hasParticipants ? "Re-seed participants" : "Initialize 360"}
+                          </button>
+                        ))}
                       {c.status === "Active" && (
                         <button
                           type="button"
                           onClick={() => closeCycle(c.id)}
                           disabled={closeCycleLoading === c.id}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#0d9488] bg-[#ccfbf1] text-[10px] font-semibold text-[#0f766e] hover:bg-[#99f6e4] disabled:opacity-50"
+                          className="rounded-lg border border-[#dde5f5] bg-white px-3 py-2 text-xs font-semibold text-[#0f2044] transition hover:bg-[#f8fafc] disabled:opacity-50"
                         >
                           {closeCycleLoading === c.id ? "Closing…" : "Close cycle"}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => toggleCycleExpand(c.id)}
-                        aria-expanded={isExpanded}
-                        className={cn("transition-transform duration-200 text-[#8a97b8]", isExpanded && "rotate-90")}
-                      >
-                        <ChevronDown size={20} />
-                      </button>
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      overflow: "hidden",
-                      transition: "max-height 0.35s ease-out",
-                      maxHeight: isExpanded ? (filteredParticipants.length === 0 && !isLoading ? 120 : 8000) : 0,
-                    }}
-                  >
-                    {isExpanded && (
-                      <>
-                        {isLoading ? (
-                          <div className="p-6 flex flex-col gap-3">
-                            {[1, 2, 3, 4, 5].map((i) => (
-                              <div key={i} className="h-12 rounded-lg bg-[#e2e8f0] opacity-70" />
+                  <div className="overflow-x-auto">
+                    {isCardLoading ? (
+                      <div className="flex flex-col gap-2 p-5">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="h-14 animate-pulse rounded-lg bg-[#e2e8f0]" />
+                        ))}
+                      </div>
+                    ) : filteredParticipants.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-[#94a3b8]">
+                        {searchQuery.trim() ? "No participants match your search." : "No participants in this cycle yet."}
+                      </p>
+                    ) : (
+                      <table className="w-full min-w-[720px] border-collapse">
+                        <thead>
+                          <tr className="bg-[#f1f5fd]">
+                            {(
+                              [
+                                ["participant", "Participant"],
+                                ["reviewers", "Reviewers"],
+                                ["self", "Self score"],
+                                ["peer", "Peer avg"],
+                                ["status", "Status"],
+                                ["actions", "Actions"],
+                              ] as const
+                            ).map(([key, label]) => (
+                              <th
+                                key={key}
+                                className={cn(
+                                  "px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-[#64748b]",
+                                  key === "actions" && "text-right"
+                                )}
+                              >
+                                {label}
+                              </th>
                             ))}
-                          </div>
-                        ) : filteredParticipants.length === 0 ? (
-                          <p className="text-center text-[13px] text-[#8a97b8] py-6">
-                            {searchQuery.trim() ? "No participants match your search." : "No participants in this cycle yet."}
-                          </p>
-                        ) : (
-                          <>
-                            <div className="grid grid-cols-3 divide-x divide-[#dde5f5]">
-                              {[
-                                { label: "Completed", value: completed, color: "#059669" },
-                                { label: "In progress", value: inProgress, color: "#3b82f6" },
-                                { label: "Pending", value: pending + notStarted, color: "#d97706" },
-                              ].map((kpi) => (
-                                <div key={kpi.label} className="flex flex-col items-center py-4 gap-0.5">
-                                  <span className="font-display text-[22px] font-bold" style={{ color: kpi.color }}>
-                                    {kpi.value}
-                                  </span>
-                                  <span className="text-[10px] font-medium uppercase tracking-[.06em] text-[#8a97b8]">
-                                    {kpi.label}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-
-                            <table className="w-full border-collapse">
-                              <thead>
-                                <tr className="bg-[#f8faff] border-t border-[#dde5f5]">
-                                  {["Participant", "Reviewers", "Self score", "Peer avg", "Self status", "Progress", ""].map((h) => (
-                                    <th
-                                      key={h}
-                                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[.06em] text-[#8a97b8] whitespace-nowrap"
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredParticipants.map((p, rowIdx) => {
+                            const resultRow = results?.results?.find((r) => r.employee_id === p.participant_employee_id);
+                            const selfScore = resultRow?.self?.avg;
+                            const peerScore = resultRow?.peer?.avg;
+                            const rowStatus = aggregateParticipantStatus(p);
+                            const showAssign = c.status === "Active";
+                            return (
+                              <tr
+                                key={p.participant_employee_id}
+                                className={cn(
+                                  "h-14 border-b border-[#f0f4ff] transition-colors hover:bg-[#f0f6ff]",
+                                  rowIdx % 2 === 0 ? "bg-white" : "bg-[#fafbff]"
+                                )}
+                              >
+                                <td className="px-4 py-2 align-middle">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0f2044] to-[#1e3a6e] text-[13px] font-semibold text-white">
+                                      {getInitials(p.participant_name, p.participant_employee_id)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium text-[#0f2044]">{p.participant_name}</p>
+                                      <p className="truncate text-[11px] text-[#94a3b8]">
+                                        {p.participant_department_name ?? "—"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2 align-middle">
+                                  {p.reviewers.length === 0 ? (
+                                    <span className="text-sm text-[#94a3b8]">—</span>
+                                  ) : (
+                                    <div className="flex items-center">
+                                      {p.reviewers.slice(0, 3).map((r, i) => (
+                                        <div
+                                          key={r.id}
+                                          className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
+                                          style={{
+                                            background: AVATAR_COLORS[i % AVATAR_COLORS.length],
+                                            marginLeft: i === 0 ? 0 : -8,
+                                            zIndex: 3 - i,
+                                          }}
+                                          title={r.reviewer_name}
+                                        >
+                                          {getInitials(r.reviewer_name, r.reviewer_employee_id)}
+                                        </div>
+                                      ))}
+                                      {p.reviewers.length > 3 && (
+                                        <span className="ml-1 rounded-full bg-[#f1f5f9] px-2 py-0.5 text-xs font-medium text-[#64748b]">
+                                          +{p.reviewers.length - 3}
+                                        </span>
+                                      )}
+                                      <span className="ml-2 text-xs text-[#64748b]">{p.reviewers.length} people</span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-middle">
+                                  {selfScore != null ? (
+                                    <span className="text-[15px] font-semibold text-[#0f2044]">
+                                      {selfScore.toFixed(1)}
+                                      <span className="text-[11px] font-normal text-[#94a3b8]"> /10</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm text-[#94a3b8]">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-middle">
+                                  {peerScore != null ? (
+                                    <span className="text-[15px] font-semibold text-[#0f2044]">
+                                      {peerScore.toFixed(1)}
+                                      <span className="text-[11px] font-normal text-[#94a3b8]"> /10</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm text-[#94a3b8]">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-middle">
+                                  <ParticipantRowStatusPill status={rowStatus} />
+                                </td>
+                                <td className="px-4 py-2 align-middle text-right">
+                                  <div className="flex flex-wrap items-center justify-end gap-1">
+                                    {showAssign && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setAssignTarget({ participant: p, cycleId: c.id })}
+                                        className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#4ecca3] transition hover:bg-[#f0fdf9]"
+                                      >
+                                        + Assign reviewer
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => openDetailModal(c.id, p)}
+                                      className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#64748b] transition hover:bg-[#f1f5f9]"
                                     >
-                                      {h}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {filteredParticipants.map((p) => {
-                                  const selfReviewer = p.reviewers.find((r) => r.reviewer_type === "SELF");
-                                  const completedCount = p.reviewers.filter((r) => (r.status || "").toLowerCase() === "completed").length;
-                                  const totalCount = p.reviewers.length;
-                                  const resultRow = results?.results?.find((r) => r.employee_id === p.participant_employee_id);
-                                  const selfScore = resultRow?.self?.avg;
-                                  const peerScore = resultRow?.peer?.avg;
-                                  return (
-                                    <tr key={p.participant_employee_id} className="border-t border-[#dde5f5] hover:bg-[#f8faff] transition-colors">
-                                      <td className="px-4 py-3">
-                                        <div className="flex items-center gap-2.5">
-                                          <div
-                                            className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0"
-                                            style={{ background: "#4f46e5" }}
-                                          >
-                                            {getInitials(p.participant_name, p.participant_employee_id)}
-                                          </div>
-                                          <div>
-                                            <p className="text-[12px] font-semibold text-[#0f1f3d]">{p.participant_name}</p>
-                                            <p className="text-[10px] text-[#8a97b8]">{p.participant_department_name ?? "—"}</p>
-                                          </div>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <div className="flex">
-                                          {p.reviewers.slice(0, 5).map((r, i) => (
-                                            <div
-                                              key={r.id}
-                                              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-white border-2 border-white flex-shrink-0"
-                                              style={{
-                                                background: AVATAR_COLORS[i % AVATAR_COLORS.length],
-                                                marginLeft: i === 0 ? 0 : -6,
-                                                zIndex: 5 - i,
-                                              }}
-                                            >
-                                              {getInitials(r.reviewer_name, r.reviewer_employee_id)}
-                                            </div>
-                                          ))}
-                                          {p.reviewers.length === 0 && (
-                                            <span className="text-[11px] text-[#8a97b8]">None assigned</span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        {selfScore != null ? (
-                                          <div className="flex items-center gap-2">
-                                            <div className="w-14 h-1 rounded-full bg-[#dde5f5] overflow-hidden">
-                                              <div
-                                                className="h-full rounded-full bg-[#d97706]"
-                                                style={{ width: `${(selfScore / 5) * 100}%` }}
-                                              />
-                                            </div>
-                                            <span className="text-[12px] text-[#0f1f3d]">{selfScore.toFixed(1)}</span>
-                                          </div>
-                                        ) : (
-                                          <span className="text-[12px] text-[#8a97b8]">—</span>
-                                        )}
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        {peerScore != null ? (
-                                          <span className="text-[12px] text-[#0f1f3d]">{peerScore.toFixed(1)}</span>
-                                        ) : (
-                                          <span className="text-[12px] text-[#8a97b8]">—</span>
-                                        )}
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <StatusPill status={selfReviewer?.status ?? "PENDING"} />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-14 h-1 rounded-full bg-[#dde5f5] overflow-hidden">
-                                            <div
-                                              className="h-full rounded-full bg-[#0d9488]"
-                                              style={{
-                                                width: totalCount > 0 ? `${(completedCount / totalCount) * 100}%` : "0%",
-                                              }}
-                                            />
-                                          </div>
-                                          <span className="text-[11px] text-[#8a97b8]">
-                                            {completedCount}/{totalCount}
-                                          </span>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <div className="flex items-center justify-end gap-2">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setAssignTarget({ participant: p, cycleId: c.id });
-                                            }}
-                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8] text-[11px] font-semibold hover:bg-[#dbeafe] transition-colors"
-                                          >
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                              <line x1="12" y1="5" x2="12" y2="19" />
-                                              <line x1="5" y1="12" x2="19" y2="12" />
-                                            </svg>
-                                            Assign reviewer
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              openDetailModal(c.id, p);
-                                            }}
-                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-[#dde5f5] bg-white text-[#4a5a82] text-[11px] font-semibold hover:border-[#0f1f3d] hover:text-[#0f1f3d] transition-colors"
-                                          >
-                                            View details
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                              <polyline points="9 18 15 12 9 6" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </>
-                        )}
-                      </>
+                                      Details
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     )}
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       <AssignReviewerModal

@@ -124,15 +124,21 @@ export async function POST(request: NextRequest) {
       ]);
 
       const feedbackCycleName = `${fiscal_year} Leadership Feedback`;
-      await supabase.from("feedback_cycle").insert({
-        cycle_name: feedbackCycleName,
-        description: null,
-        linked_appraisal_cycle_id: created.id,
-        start_date: start_date || null,
-        end_date: end_date || null,
-        status: "Draft",
-        created_by: user.id,
-      });
+      const { error: fcError } = await supabase.from("feedback_cycle").upsert(
+        {
+          cycle_name: feedbackCycleName,
+          description: null,
+          linked_appraisal_cycle_id: created.id,
+          start_date: start_date || null,
+          end_date: end_date || null,
+          status: "Draft",
+          created_by: user.id,
+        },
+        { onConflict: "linked_appraisal_cycle_id" }
+      );
+      if (fcError) {
+        console.error("[admin/cycles] feedback_cycle upsert failed:", fcError);
+      }
     }
 
     return NextResponse.json({ id: created?.id });

@@ -8,15 +8,18 @@ const WEIGHTS: Record<ReviewerType, number> = {
   DIRECT_REPORT: 0.25,
 };
 
-export async function computeAggregatedScore(
-  supabase: SupabaseClient,
-  cycleId: string,
-  revieweeId: string
-): Promise<{
+export type OthersAggregateResult = {
   complete: boolean;
   overall: number | null;
   byType: Partial<Record<ReviewerType, { avg: number; count: number }>>;
-}> {
+};
+
+/** Read-only weighted 1–5 aggregate from MANAGER / PEER / DIRECT_REPORT submitted responses. */
+export async function computeOthersAggregateMetrics(
+  supabase: SupabaseClient,
+  cycleId: string,
+  revieweeId: string
+): Promise<OthersAggregateResult> {
   const { data: reviewers } = await supabase
     .from("feedback_reviewer")
     .select("id, reviewer_type, status")
@@ -75,8 +78,17 @@ export async function computeAggregatedScore(
   });
   const overall = weightUsed > 0 ? weightedTotal / weightUsed : null;
 
-  // Persist completion state on participant row (no schema migration needed).
-  if (complete) {
+  return { complete, overall, byType };
+}
+
+export async function computeAggregatedScore(
+  supabase: SupabaseClient,
+  cycleId: string,
+  revieweeId: string
+): Promise<OthersAggregateResult> {
+  const result = await computeOthersAggregateMetrics(supabase, cycleId, revieweeId);
+
+  if (result.complete) {
     await supabase
       .from("feedback_participant")
       .update({ status: "Completed" })
@@ -84,6 +96,5 @@ export async function computeAggregatedScore(
       .eq("employee_id", revieweeId);
   }
 
-  return { complete, overall, byType };
+  return result;
 }
-

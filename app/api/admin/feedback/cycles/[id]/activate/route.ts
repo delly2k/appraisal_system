@@ -19,12 +19,14 @@ async function requireHrAdmin() {
 
 /**
  * POST /api/admin/feedback/cycles/[id]/activate
- * HR-only: activate a Draft 360 cycle and/or seed participants from reporting_lines when
+ * Uses the existing `feedback_cycle` row for `[id]` only — does not insert new cycles.
+ * HR-only: activate a Draft 360 cycle and/or seed participants when
  * automatic activation failed (e.g. 360 linked after appraisal was already open).
  * Idempotent: if participants already exist, returns ok without changing data.
+ * Re-initialize bad seeds: POST ?reseed=1 (HR-only) clears participants first, then re-runs seeding.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -45,7 +47,21 @@ export async function POST(
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const result = await activateFeedbackCycle(supabase, cycleId);
+    const reseed =
+      new URL(request.url).searchParams.get("reseed") === "1" ||
+      new URL(request.url).searchParams.get("reseed") === "true";
+
+    if (reseed) {
+      const { error: delErr } = await supabase
+        .from("feedback_participant")
+        .delete()
+        .eq("cycle_id", cycleId);
+      if (delErr) {
+        return NextResponse.json({ error: delErr.message }, { status: 500 });
+      }
+    }
+
+    const result = await activateFeedbackCycle(supabase, cycleId, { reseed });
     if (!result.ok) {
       if (result.code === "NOT_FOUND") {
         return NextResponse.json({ error: result.error }, { status: 404 });
@@ -58,9 +74,14 @@ export async function POST(
 
     return NextResponse.json({
       ok: true,
+      success: true,
       alreadySeeded: result.alreadySeeded,
       participantCount: result.participantCount,
       status: result.status,
+      ...(result.participantsCreated !== undefined && {
+        participantsCreated: result.participantsCreated,
+        skipped: result.skipped ?? 0,
+      }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Activate failed";

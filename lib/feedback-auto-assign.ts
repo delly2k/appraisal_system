@@ -1,97 +1,172 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-type EmployeeRow = {
-  employee_id: string;
-  full_name: string | null;
-  department_id?: string | null;
-  manager_employee_id?: string | null;
-  is_manager?: boolean | null;
-};
-
-function pickRandom<T>(arr: T[], count: number): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy.slice(0, count);
-}
-
+/**
+ * Assign reviewers for a 360 participant (manager) using the appraisals table only:
+ * - Their manager (row where employee_id = participant) → MANAGER reviewer
+ * - Their direct reports (rows where manager_employee_id = participant) → DIRECT_REPORT reviewers
+ */
 export async function autoAssignReviewers(
   supabase: SupabaseClient,
   cycleId: string,
-  revieweeEmployeeId: string
-): Promise<void> {
-  const { data: reviewee } = await supabase
-    .from("employees")
-    .select("employee_id, full_name, department_id, manager_employee_id, is_manager")
-    .eq("employee_id", revieweeEmployeeId)
-    .eq("is_active", true)
-    .maybeSingle<EmployeeRow>();
-  if (!reviewee) return;
+  participantEmployeeId: string
+): Promise<{ assigned: number }> {
+  console.log(`[360 assign] Processing ${participantEmployeeId}`);
 
-  const { data: directReports } = await supabase
-    .from("employees")
-    .select("employee_id, full_name, department_id, manager_employee_id")
-    .eq("manager_employee_id", revieweeEmployeeId)
+  // Fetch this person's own appraisal row
+  const { data: selfRow, error: selfErr } = await supabase
+    .from("appraisals")
+    .select("manager_employee_id, division_id")
+    .eq("employee_id", participantEmployeeId)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (selfErr) {
+    console.error(`[360 assign] Appraisals self lookup error for ${participantEmployeeId}:`, selfErr);
+  }
+
+  const myManagerId = selfRow?.manager_employee_id ?? null;
+  const myDivisionId = selfRow?.division_id ?? null;
+
+  // Fetch direct reports
+  const { data: directReportRows, error: drErr } = await supabase
+    .from("appraisals")
+    .select("employee_id")
+    .eq("manager_employee_id", participantEmployeeId)
     .eq("is_active", true);
 
-  const direct = (directReports ?? []) as EmployeeRow[];
-  const isManagerLevel = !!reviewee.is_manager || direct.length > 0;
-  if (!isManagerLevel) return;
-
-  const directIds = new Set(direct.map((d) => d.employee_id));
-  const managerId = reviewee.manager_employee_id ?? null;
-
-  let peerPool: EmployeeRow[] = [];
-  if (reviewee.department_id) {
-    const { data: peers } = await supabase
-      .from("employees")
-      .select("employee_id, full_name, department_id, manager_employee_id")
-      .eq("department_id", reviewee.department_id)
-      .eq("is_active", true)
-      .neq("employee_id", revieweeEmployeeId);
-    peerPool = (peers ?? []) as EmployeeRow[];
+  if (drErr) {
+    console.error(`[360 assign] Appraisals direct reports error for ${participantEmployeeId}:`, drErr);
+    return { assigned: 0 };
   }
 
-  const peersFiltered = peerPool.filter((p) => {
-    if (!p.employee_id) return false;
-    if (directIds.has(p.employee_id)) return false;
-    if (managerId && p.employee_id === managerId) return false;
-    return true;
-  });
-  const pickedPeers = pickRandom(peersFiltered, 2);
+  const directReportIds = (directReportRows ?? [])
+    .map((r) => r.employee_id as string | null | undefined)
+    .filter((id): id is string => Boolean(id && id !== participantEmployeeId));
 
-  const assignments: { reviewer_employee_id: string; reviewer_type: "DIRECT_REPORT" | "PEER" | "MANAGER" }[] = [];
-  for (const dr of direct) assignments.push({ reviewer_employee_id: dr.employee_id, reviewer_type: "DIRECT_REPORT" });
-  for (const peer of pickedPeers) assignments.push({ reviewer_employee_id: peer.employee_id, reviewer_type: "PEER" });
-  if (managerId) assignments.push({ reviewer_employee_id: managerId, reviewer_type: "MANAGER" });
-
-  if (assignments.length === 0) return;
-
-  // Keep at most 2 PEER reviewers by pruning old/random extras first.
-  const { data: existingPeers } = await supabase
-    .from("feedback_reviewer")
-    .select("id, reviewer_employee_id")
-    .eq("cycle_id", cycleId)
-    .eq("participant_employee_id", revieweeEmployeeId)
-    .eq("reviewer_type", "PEER");
-  const keepPeerIds = new Set(pickedPeers.map((p) => p.employee_id));
-  for (const row of existingPeers ?? []) {
-    if (!keepPeerIds.has(row.reviewer_employee_id)) {
-      await supabase.from("feedback_reviewer").delete().eq("id", row.id);
-    }
-  }
-
-  await supabase.from("feedback_reviewer").upsert(
-    assignments.map((a) => ({
-      cycle_id: cycleId,
-      participant_employee_id: revieweeEmployeeId,
-      reviewer_employee_id: a.reviewer_employee_id,
-      reviewer_type: a.reviewer_type,
-      status: "Pending",
-    })),
-    { onConflict: "cycle_id,participant_employee_id,reviewer_employee_id,reviewer_type" }
+  console.log(
+    `[360 assign] ${participantEmployeeId}: manager=${myManagerId ?? "none"}, reports=${directReportIds.length}, division=${myDivisionId ?? "none"}`
   );
-}
 
+  // Peer selection
+  let peerCandidates: string[] = [];
+
+  // Primary: same-manager peers
+  if (myManagerId) {
+    const { data: siblingRows, error: sibErr } = await supabase
+      .from("appraisals")
+      .select("employee_id")
+      .eq("manager_employee_id", myManagerId)
+      .eq("is_active", true)
+      .neq("employee_id", participantEmployeeId);
+    if (sibErr) {
+      console.error(`[360 assign] Appraisals sibling peer lookup error for ${participantEmployeeId}:`, sibErr);
+    }
+    peerCandidates =
+      siblingRows
+        ?.map((r) => r.employee_id as string | null | undefined)
+        .filter((id): id is string => Boolean(id && id !== participantEmployeeId)) ?? [];
+
+    console.log(`[360 assign] ${participantEmployeeId}: ${peerCandidates.length} same-manager peers`);
+  }
+
+  // Fallback: same division if fewer than 2 peers
+  if (peerCandidates.length < 2 && myDivisionId) {
+    const { data: divisionRows, error: divErr } = await supabase
+      .from("appraisals")
+      .select("employee_id")
+      .eq("division_id", myDivisionId)
+      .eq("is_active", true)
+      .neq("employee_id", participantEmployeeId);
+    if (divErr) {
+      console.error(`[360 assign] Appraisals division peer lookup error for ${participantEmployeeId}:`, divErr);
+    }
+    const divisionPeers =
+      divisionRows
+        ?.map((r) => r.employee_id as string | null | undefined)
+        .filter((id): id is string => Boolean(id && !peerCandidates.includes(id))) ?? [];
+
+    peerCandidates = [...new Set([...peerCandidates, ...divisionPeers])];
+    console.log(
+      `[360 assign] ${participantEmployeeId}: ${peerCandidates.length} total peers after division fallback`
+    );
+  }
+
+  // Anonymity gate: need at least 2 peers; pick up to 3
+  const peersToAssign: string[] = [];
+  if (peerCandidates.length >= 2) {
+    const shuffled = [...peerCandidates].sort(() => Math.random() - 0.5).slice(0, 3);
+    peersToAssign.push(...shuffled);
+    console.log(`[360 assign] ${participantEmployeeId}: assigning ${peersToAssign.length} peers`);
+  } else {
+    console.warn(
+      `[360 assign] ${participantEmployeeId}: only ${peerCandidates.length} peer(s) — skipping (anonymity gate)`
+    );
+  }
+
+  type UpsertRow = {
+    cycle_id: string;
+    participant_employee_id: string;
+    reviewer_employee_id: string;
+    reviewer_type: "SELF" | "MANAGER" | "DIRECT_REPORT" | "PEER";
+    status: "Pending";
+  };
+
+  const reviewerRows: UpsertRow[] = [];
+
+  // SELF
+  reviewerRows.push({
+    cycle_id: cycleId,
+    participant_employee_id: participantEmployeeId,
+    reviewer_employee_id: participantEmployeeId,
+    reviewer_type: "SELF",
+    status: "Pending",
+  });
+
+  // MANAGER
+  if (myManagerId && myManagerId !== participantEmployeeId) {
+    reviewerRows.push({
+      cycle_id: cycleId,
+      participant_employee_id: participantEmployeeId,
+      reviewer_employee_id: myManagerId,
+      reviewer_type: "MANAGER",
+      status: "Pending",
+    });
+  }
+
+  // DIRECT_REPORT
+  for (const reportId of [...new Set(directReportIds)]) {
+    reviewerRows.push({
+      cycle_id: cycleId,
+      participant_employee_id: participantEmployeeId,
+      reviewer_employee_id: reportId,
+      reviewer_type: "DIRECT_REPORT",
+      status: "Pending",
+    });
+  }
+
+  // PEER
+  for (const peerId of peersToAssign) {
+    reviewerRows.push({
+      cycle_id: cycleId,
+      participant_employee_id: participantEmployeeId,
+      reviewer_employee_id: peerId,
+      reviewer_type: "PEER",
+      status: "Pending",
+    });
+  }
+
+  console.log(`[360 assign] ${participantEmployeeId}: upserting ${reviewerRows.length} total reviewer rows`);
+
+  const { error } = await supabase.from("feedback_reviewer").upsert(reviewerRows, {
+    onConflict: "cycle_id,participant_employee_id,reviewer_employee_id,reviewer_type",
+    ignoreDuplicates: true,
+  });
+
+  if (error) {
+    console.error(`[360 assign] Upsert error for ${participantEmployeeId}:`, error);
+    return { assigned: 0 };
+  }
+
+  return { assigned: reviewerRows.length };
+}

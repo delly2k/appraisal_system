@@ -25,12 +25,14 @@ type BatchItem =
       alreadySeeded: boolean;
       participantCount: number;
       status: string;
+      participantsCreated?: number;
+      skipped?: number;
     }
   | { cycleId: string; cycleName: string; ok: false; error: string };
 
 /**
  * POST /api/admin/feedback/cycles/activate-pending
- * HR-only: run the same logic as single-cycle activate for every non-Closed cycle with zero participants.
+ * HR-only: cycles with status Active or Draft and zero feedback_participant rows (not Closed).
  */
 export async function POST() {
   try {
@@ -46,7 +48,7 @@ export async function POST() {
     const { data: cycles, error: cErr } = await supabase
       .from("feedback_cycle")
       .select("id, cycle_name, status")
-      .neq("status", "Closed");
+      .in("status", ["Active", "Draft"]);
 
     if (cErr) {
       return NextResponse.json({ error: cErr.message }, { status: 500 });
@@ -82,6 +84,10 @@ export async function POST() {
           alreadySeeded: r.alreadySeeded,
           participantCount: r.participantCount,
           status: r.status,
+          ...(r.participantsCreated !== undefined && {
+            participantsCreated: r.participantsCreated,
+            skipped: r.skipped,
+          }),
         });
       } else {
         results.push({ cycleId: c.id, cycleName: name, ok: false, error: r.error });
