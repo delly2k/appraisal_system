@@ -56,6 +56,19 @@ export async function POST(
     }
 
     // Do not change status here. The only path to PENDING_SIGNOFF is via Sign-offs tab → "Generate PDF & send via Adobe Sign" (signoff/submit).
+    try {
+      const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+      await createNotificationForEmployeeId(appraisal.employee_id, {
+        type: "appraisal.manager_reviewed",
+        title: "Manager review complete",
+        body: "Your manager has completed their review of your appraisal.",
+        link: `/appraisals/${appraisalId}`,
+        metadata: { appraisal_id: appraisalId },
+      });
+    } catch {
+      /* non-blocking */
+    }
+
     return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

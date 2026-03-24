@@ -207,6 +207,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           checkInTitle: (checkIn as { title?: string }).title ?? "Check-in",
           managerEmail,
         });
+        const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+        await createNotificationForEmployeeId(appraisal.manager_employee_id, {
+          type: "checkin.completed",
+          title: "Check-in submitted",
+          body: `${employeeName} has submitted their check-in: "${(checkIn as { title?: string }).title ?? "Check-in"}".`,
+          link: `/appraisals/${appraisalId}`,
+          metadata: { appraisal_id: appraisalId, check_in_id: checkinId },
+        });
       } catch {
         // notification is non-blocking
       }
@@ -305,6 +313,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           checkInId: checkinId,
           employeeName,
           employeeEmail,
+        });
+        const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+        await createNotificationForEmployeeId(appraisal.employee_id, {
+          type: "system.announcement",
+          title: "Check-in reviewed",
+          body: "Your manager has reviewed your check-in. Log in to the appraisal portal to view their feedback.",
+          link: `/appraisals/${appraisalId}`,
+          metadata: { appraisal_id: appraisalId, check_in_id: checkinId, kind: "checkin_manager_reviewed" },
         });
       } catch {
         // notification is non-blocking

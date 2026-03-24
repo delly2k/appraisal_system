@@ -339,4 +339,21 @@ export async function sendNotification(params: SendNotificationParams, supabase:
     ? `${message}\n\nView appraisal: ${process.env.NEXT_PUBLIC_APP_URL ?? ""}/appraisals/${appraisalId}`
     : message;
   await sendEmail({ to: email, subject, bodyText });
+
+  try {
+    const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+    const link = appraisalId ? `/appraisals/${appraisalId}` : undefined;
+    let ntype: import("@/lib/notifications/types").NotificationType = "system.announcement";
+    if (type === "SIGNOFF_ACTION_REQUIRED") ntype = "appraisal.sign_off_ready";
+    else if (type === "SIGNOFF_COMPLETE") ntype = "appraisal.signed";
+    await createNotificationForEmployeeId(recipientEmployeeId, {
+      type: ntype,
+      title: subject,
+      body: message,
+      link,
+      metadata: { signoff_type: type, appraisal_id: appraisalId ?? null },
+    });
+  } catch {
+    /* in-app notification is non-blocking */
+  }
 }

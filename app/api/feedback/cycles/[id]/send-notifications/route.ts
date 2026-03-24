@@ -92,6 +92,17 @@ export async function POST(
     let sent = 0;
     const failures: { reviewer_employee_id: string; error: string }[] = [];
 
+    const { data: reviewerAppUsers } = await supabase
+      .from("app_users")
+      .select("id, employee_id")
+      .in("employee_id", reviewerIds)
+      .eq("is_active", true);
+    const appUserIdByReviewer = new Map(
+      (reviewerAppUsers ?? []).map((r) => [r.employee_id as string, r.id as string])
+    );
+    const inAppByReviewer = new Set<string>();
+    const { createNotification } = await import("@/lib/notifications/create");
+
     for (const row of reviewers) {
       const toEmail = emailMap.get(row.reviewer_employee_id);
       if (!toEmail || !toEmail.trim()) {
@@ -107,6 +118,22 @@ export async function POST(
           deadline,
         });
         sent++;
+        const uid = appUserIdByReviewer.get(row.reviewer_employee_id);
+        if (uid && !inAppByReviewer.has(row.reviewer_employee_id)) {
+          inAppByReviewer.add(row.reviewer_employee_id);
+          try {
+            await createNotification({
+              user_id: uid,
+              type: "feedback.assigned",
+              title: "360 review assigned",
+              body: `You have been asked to complete a feedback review for ${participantName}.`,
+              link: "/feedback",
+              metadata: { cycle_id: cycleId, participant_employee_id: row.participant_employee_id },
+            });
+          } catch {
+            /* non-blocking */
+          }
+        }
       } catch (err) {
         failures.push({
           reviewer_employee_id: row.reviewer_employee_id,

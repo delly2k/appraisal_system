@@ -26,7 +26,7 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, employee_id")
+      .select("id, status, employee_id, manager_employee_id")
       .eq("id", appraisalId)
       .single();
 
@@ -116,6 +116,25 @@ export async function POST(
             { onConflict: "appraisal_id" }
           );
       }
+    }
+
+    try {
+      const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+      const { data: empRow } = await supabase
+        .from("employees")
+        .select("full_name")
+        .eq("employee_id", appraisal.employee_id)
+        .maybeSingle();
+      const employeeName = empRow?.full_name ?? "An employee";
+      await createNotificationForEmployeeId(appraisal.manager_employee_id, {
+        type: "appraisal.submitted",
+        title: "Appraisal submitted",
+        body: `${employeeName} has submitted their self-assessment for review.`,
+        link: `/appraisals/${appraisalId}`,
+        metadata: { appraisal_id: appraisalId },
+      });
+    } catch {
+      /* non-blocking */
     }
 
     return NextResponse.json({ success: true, status: "MANAGER_REVIEW" });

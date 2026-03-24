@@ -14,5 +14,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const user = await getCurrentUser();
-  return NextResponse.json(user ?? { error: "User not found" });
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  return NextResponse.json({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    roles: user.roles ?? [],
+    employee_id: user.employee_id ?? null,
+    division_id: user.division_id ?? null,
+  });
 }

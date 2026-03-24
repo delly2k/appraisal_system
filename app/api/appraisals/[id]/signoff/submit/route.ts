@@ -220,6 +220,19 @@ export async function POST(
       .update({ status: "PENDING_SIGNOFF" })
       .eq("id", appraisalId);
 
+    try {
+      const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+      await createNotificationForEmployeeId(appraisal.employee_id, {
+        type: "appraisal.sign_off_ready",
+        title: "Sign-off started",
+        body: "Your appraisal is ready for sign-off. Check your email from Adobe Sign to add your signature.",
+        link: `/appraisals/${appraisalId}`,
+        metadata: { appraisal_id: appraisalId },
+      });
+    } catch {
+      /* non-blocking */
+    }
+
     return NextResponse.json({ success: true, agreementId });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

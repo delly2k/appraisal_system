@@ -37,6 +37,25 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  const roles: string[] = Array.isArray((token as { roles?: unknown }).roles)
+    ? ((token as { roles?: unknown[] }).roles ?? []).map((r) => String(r))
+    : [];
+
+  const hrRoutes = ["/admin/appraisals", "/admin/360"];
+  const adminRoutes = ["/admin/users", "/admin/operational-plan"];
+
+  if (hrRoutes.some((r) => pathname.startsWith(r)) && !roles.includes("hr")) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
+  if (adminRoutes.some((r) => pathname.startsWith(r)) && !roles.includes("admin")) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
+  if ((pathname === "/admin" || pathname.startsWith("/admin/")) && !roles.includes("hr") && !roles.includes("admin")) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
   return NextResponse.next();
 }
 

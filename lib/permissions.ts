@@ -25,6 +25,11 @@ export type Permission =
   | "team_reviews:view"
   | "team_reviews:approve"
   | "admin:view"
+  | "admin:hr:view"
+  | "admin:appraisals:view"
+  | "admin:360:view"
+  | "admin:users:view"
+  | "admin:operational-plan"
   | "admin:manage_users"
   | "admin:manage_cycles"
   | "admin:reports";
@@ -56,6 +61,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "development:view_own",
     "team_reviews:view",
     "admin:view",
+    "admin:hr:view",
+    "admin:appraisals:view",
+    "admin:360:view",
     "admin:reports",
   ],
   admin: [
@@ -69,6 +77,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team_reviews:view",
     "team_reviews:approve",
     "admin:view",
+    "admin:hr:view",
+    "admin:users:view",
+    "admin:operational-plan",
     "admin:manage_users",
     "admin:manage_cycles",
     "admin:reports",
@@ -122,6 +133,18 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
  */
 export function userHasPermission(roles: UserRole[], permission: Permission): boolean {
   return roles.some((role) => hasPermission(role, permission));
+}
+
+export function hasRole(roles: string[], role: "hr" | "admin"): boolean {
+  return roles.includes(role);
+}
+
+export function isHR(roles: string[]): boolean {
+  return hasRole(roles, "hr");
+}
+
+export function isAdmin(roles: string[]): boolean {
+  return hasRole(roles, "admin");
 }
 
 /**

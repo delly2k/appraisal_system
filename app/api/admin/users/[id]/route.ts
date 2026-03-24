@@ -16,11 +16,11 @@ async function requireHrAdmin() {
   return isAdmin ? user : null;
 }
 
-const ALLOWED_ROLES = ["admin", "hr", "gm", "manager", "individual"] as const;
+const ALLOWED_ROLES = ["admin", "hr"] as const;
 
 /**
  * PATCH /api/admin/users/[id]
- * Update app user display_name, role, employee_id, division_id, or is_active. HR/admin only.
+ * Update app user display_name, roles, employee_id, division_id, or is_active. HR/admin only.
  */
 export async function PATCH(
   request: NextRequest,
@@ -41,32 +41,42 @@ export async function PATCH(
     }
     const body = await request.json().catch(() => ({}));
     const display_name = body.display_name !== undefined ? (body.display_name === null || body.display_name === "" ? null : String(body.display_name).trim()) : undefined;
-    const role = typeof body.role === "string" ? body.role.trim().toLowerCase() : undefined;
+    const legacyRole = typeof body.role === "string" ? body.role.trim().toLowerCase() : undefined;
+    const rolesRaw = Array.isArray(body.roles) ? body.roles : legacyRole ? [legacyRole] : undefined;
+    const roles = rolesRaw
+      ? rolesRaw
+          .map((r: unknown) => String(r).trim().toLowerCase())
+          .filter((r: string): r is (typeof ALLOWED_ROLES)[number] =>
+            ALLOWED_ROLES.includes(r as (typeof ALLOWED_ROLES)[number])
+          )
+      : undefined;
     const employee_id = body.employee_id !== undefined ? (body.employee_id === null ? null : String(body.employee_id).trim()) : undefined;
     const division_id = body.division_id !== undefined ? (body.division_id === null ? null : String(body.division_id).trim()) : undefined;
     const is_active = typeof body.is_active === "boolean" ? body.is_active : undefined;
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (display_name !== undefined) updates.display_name = display_name;
-    if (role !== undefined) {
-      if (!ALLOWED_ROLES.includes(role as (typeof ALLOWED_ROLES)[number])) {
-        return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    if (rolesRaw !== undefined) {
+      if (!roles || roles.length !== rolesRaw.length) {
+        return NextResponse.json({ error: "Invalid roles (only hr/admin allowed)" }, { status: 400 });
       }
-      updates.role = role;
+      updates.roles = roles;
     }
     if (employee_id !== undefined) updates.employee_id = employee_id || null;
     if (division_id !== undefined) updates.division_id = division_id || null;
     if (is_active !== undefined) updates.is_active = is_active;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("app_users")
       .update(updates)
-      .eq("id", id);
+      .eq("id", id)
+      .select("roles, display_name, employee_id, division_id, is_active")
+      .single();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, user: data });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Update user failed";
     return NextResponse.json({ error: message }, { status: 500 });

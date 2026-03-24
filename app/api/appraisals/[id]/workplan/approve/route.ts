@@ -88,6 +88,18 @@ export async function POST(
             appraisalId,
           }
         );
+        try {
+          const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+          await createNotificationForEmployeeId(row.employee_id, {
+            type: "system.announcement",
+            title: "Work plan approved",
+            body: `Your work plan for ${cycle.name} has been approved. You can use check-ins and start your self-assessment when ready.`,
+            link: `/appraisals/${appraisalId}`,
+            metadata: { appraisal_id: appraisalId, cycle_id: row.cycle_id },
+          });
+        } catch {
+          /* non-blocking */
+        }
       }
     }
 

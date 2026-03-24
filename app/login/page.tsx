@@ -3,13 +3,22 @@
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.1.0";
+
 export default function LoginPage() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
   const error = searchParams.get("error");
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative bg-[#0a1628]">
+    <div
+      className="min-h-screen flex items-center justify-center relative bg-no-repeat"
+      style={{
+        backgroundImage: "url('/bg1.jpg')",
+        backgroundSize: "cover",
+        backgroundPosition: "50% 35%",
+      }}
+    >
       {/* Overlay */}
       <div
         className="absolute inset-0"
@@ -24,10 +33,10 @@ export default function LoginPage() {
         style={{ background: "linear-gradient(90deg, #0d9488, #3b82f6)" }}
         aria-hidden
       />
-      {/* Bottom-left caption */}
-      <div className="absolute bottom-5 left-7 z-10 pointer-events-none">
-        <p className="font-display text-[13px] font-semibold text-white/70">Development Bank of Jamaica</p>
-        <p className="font-body text-[11px] font-light text-white/35 tracking-wide">11A–15 Oxford Road, Kingston 5</p>
+      <div className="absolute bottom-5 right-7 z-10 pointer-events-none">
+        <span className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-[10px] font-medium text-white/80 backdrop-blur-sm">
+          {APP_VERSION}
+        </span>
       </div>
 
       {/* Card */}

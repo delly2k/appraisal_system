@@ -406,6 +406,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
         : undefined,
     }));
 
+    if (appraisal.employee_id !== user.employee_id) {
+      try {
+        const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+        await createNotificationForEmployeeId(appraisal.employee_id, {
+          type: "checkin.requested",
+          title: "New check-in",
+          body: `You have a new check-in to complete: "${(checkIn as { title: string }).title}".`,
+          link: `/appraisals/${appraisalId}`,
+          metadata: { appraisal_id: appraisalId, check_in_id: checkIn.id },
+        });
+      } catch {
+        /* non-blocking */
+      }
+    }
+
     return NextResponse.json({
       checkIn: {
         id: checkIn.id,

@@ -23,6 +23,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/utils/cn";
+import { NotificationBell } from "@/components/layout/notification-bell";
 
 interface TopNavProps {
   onMenuClick?: () => void;
@@ -34,13 +35,6 @@ const MenuIcon = () => (
     <line x1="3" y1="12" x2="21" y2="12" />
     <line x1="3" y1="6" x2="21" y2="6" />
     <line x1="3" y1="18" x2="21" y2="18" />
-  </svg>
-);
-
-const BellIcon = () => (
-  <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
   </svg>
 );
 
@@ -159,22 +153,7 @@ export function TopNav({ onMenuClick, className }: TopNavProps) {
 
       {/* Right: Action buttons + User menu */}
       <div className="flex items-center gap-2">
-        {/* Notifications button */}
-        <button
-          className="relative flex h-[34px] w-[34px] items-center justify-center rounded-lg border text-text-secondary transition-colors hover:bg-surface hover:text-text-primary"
-          style={{ borderColor: "var(--border-color)" }}
-          title="Notifications"
-        >
-          <BellIcon />
-          {/* Red notification dot */}
-          <span
-            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full"
-            style={{
-              backgroundColor: "var(--rose)",
-              boxShadow: "0 0 0 1.5px white",
-            }}
-          />
-        </button>
+        <NotificationBell />
 
         {/* Help button */}
         <button

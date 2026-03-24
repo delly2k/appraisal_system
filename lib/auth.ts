@@ -20,6 +20,8 @@ export interface AuthUser {
   employee_id?: string | null;
   /** Division for GM role; used by RLS and division-scoped views. */
   division_id?: string | null;
+  /** Temporary fallback while app_users.role exists during migration window. */
+  role?: string | null;
 }
 
 /** Default placeholder user when no seed user is configured. */
@@ -79,7 +81,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 
   const { data: row, error } = await supabase
     .from("app_users")
-    .select("id, email, display_name, role, employee_id, division_id")
+    .select("id, email, display_name, role, roles, employee_id, division_id")
     .ilike("email", email)
     .eq("is_active", true)
     .maybeSingle();
@@ -99,13 +101,24 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
         division_id = emp.division_id ?? null;
       }
     }
+    const dbRoles = Array.isArray((row as { roles?: unknown }).roles)
+      ? ((row as { roles?: unknown[] }).roles ?? []).map((r) => String(r))
+      : [];
+    const fallbackRole = typeof row.role === "string" ? row.role : null;
+    const resolvedRoles =
+      dbRoles.length > 0
+        ? dbRoles
+        : fallbackRole && fallbackRole !== "individual"
+          ? [fallbackRole]
+          : [];
     return {
       id: row.id,
       email: row.email ?? null,
       name: row.display_name ?? row.email ?? null,
-      roles: [toUserRole(row.role)],
+      roles: resolvedRoles.map((r) => toUserRole(r)),
       employee_id,
       division_id,
+      role: fallbackRole,
     };
   }
 

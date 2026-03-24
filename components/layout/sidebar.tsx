@@ -5,15 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/utils/cn";
 import { useAuth } from "@/hooks/use-auth";
-import { useHasPermission } from "@/hooks/use-permissions";
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ReactNode;
-  permission?: "team_reviews:view" | "admin:view";
   exactMatch?: boolean;
-  section?: string;
+  section?: "main" | "hr" | "admin";
 }
 
 const GridIcon = () => (
@@ -126,60 +124,58 @@ const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <GridIcon />, section: "main" },
   { href: "/appraisals", label: "My Appraisals", icon: <DocumentIcon />, section: "main" },
   { href: "/feedback", label: "360 Feedback", icon: <Feedback360Icon />, section: "main" },
-  { href: "/development", label: "Development Profile", icon: <BoltIcon />, section: "main" },
+  { href: "/development-profile", label: "Development Profile", icon: <BoltIcon />, section: "main" },
   {
     href: "/admin/appraisals",
     label: "All Appraisals",
     icon: <ListIcon />,
-    permission: "admin:view",
     section: "hr",
   },
   {
     href: "/admin/360",
     label: "All 360 Reviews",
     icon: <Feedback360Icon />,
-    permission: "admin:view",
     section: "hr",
   },
   {
     href: "/admin",
     label: "HR Administration",
     icon: <SettingsIcon />,
-    permission: "admin:view",
     section: "hr",
+  },
+  {
+    href: "/admin",
+    label: "HR Administration",
+    icon: <SettingsIcon />,
+    section: "admin",
   },
   {
     href: "/admin/operational-plan",
     label: "Operational Plan",
     icon: <OperationalPlanIcon />,
-    permission: "admin:view",
-    section: "hr",
+    section: "admin",
   },
   {
     href: "/admin/users",
     label: "User administration",
     icon: <UsersIcon />,
-    permission: "admin:view",
-    section: "hr",
+    section: "admin",
   },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
-  const hasTeamReviews = useHasPermission(user?.roles, "team_reviews:view");
-  const hasAdmin = useHasPermission(user?.roles, "admin:view");
+  const roles = (user?.roles ?? []).map((r) => String(r).toLowerCase());
+  const isHR = roles.includes("hr");
+  const isAdmin = roles.includes("admin");
   const [collapsed, setCollapsed] = useState(false);
 
-  const filteredNavItems = navItems.filter((item) => {
-    if (item.permission === "team_reviews:view" && !hasTeamReviews) return false;
-    if (item.permission === "admin:view" && !hasAdmin) return false;
-    return true;
-  });
-
-  const mainItems = filteredNavItems.filter((i) => i.section === "main");
-  const teamItems = filteredNavItems.filter((i) => i.section === "team");
-  const hrItems = filteredNavItems.filter((i) => i.section === "hr");
+  const mainItems = navItems.filter((i) => i.section === "main");
+  const hrItems = isHR ? navItems.filter((i) => i.section === "hr") : [];
+  const adminItems = isAdmin
+    ? navItems.filter((i) => i.section === "admin" && (isHR ? i.href !== "/admin" : true))
+    : [];
 
   const initials = user?.name
     ? user.name
@@ -285,16 +281,16 @@ export function Sidebar() {
           })}
         </div>
 
-        {/* Team section */}
-        {teamItems.length > 0 && (
+        {/* Admin section */}
+        {adminItems.length > 0 && (
           <>
             {!collapsed && (
               <div className="mb-2 mt-6 px-3 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-white/30">
-                Team
+                Admin
               </div>
             )}
             <div className="space-y-0.5">
-              {teamItems.map((item) => {
+              {adminItems.map((item) => {
                 const isActive = item.exactMatch
                   ? pathname === item.href
                   : pathname === item.href || pathname.startsWith(item.href + "/");
