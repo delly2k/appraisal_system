@@ -5,6 +5,26 @@ import { createPortal } from "react-dom";
 import { Calendar, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AssignReviewerModal } from "@/components/feedback/AssignReviewerModal";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+
+const ListIcon = () => (
+  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="8" y1="6" x2="21" y2="6" />
+    <line x1="8" y1="12" x2="21" y2="12" />
+    <line x1="8" y1="18" x2="21" y2="18" />
+    <line x1="3" y1="6" x2="3.01" y2="6" />
+    <line x1="3" y1="12" x2="3.01" y2="12" />
+    <line x1="3" y1="18" x2="3.01" y2="18" />
+  </svg>
+);
+
+const SearchIcon = () => (
+  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
 
 interface FeedbackCycle {
   id: string;
@@ -658,37 +678,25 @@ export default function Admin360Page() {
   }, [participantsOverviewCycleId, assignmentsCycleId]);
 
   return (
-    <div
-      className="min-h-screen bg-[#f0f4ff]"
-      style={{
-        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-        animation: "fadeUp 0.4s ease both",
-      }}
-    >
-      <div className="mx-auto max-w-7xl px-5 pb-12 pt-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex gap-4 border-l-4 border-[#4ecca3] pl-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e6faf3] text-lg font-medium text-[#0f2044]">
-              ◎
-            </div>
-            <div>
-              <h1 className="text-[22px] font-semibold leading-tight text-[#0f2044]">360 Feedback Reviews</h1>
-              <p className="mt-0.5 text-[13px] text-[#64748b]">Track and manage multi-rater feedback cycles</p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end">
-            <div className="relative w-full min-w-[260px] max-w-[320px] sm:w-80">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" aria-hidden />
-              <input
-                type="search"
-                placeholder="Search participants by name or department..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-[#dde5f5] bg-white py-2.5 pl-10 pr-4 text-sm text-[#0f2044] outline-none transition focus:border-[#4ecca3] focus:ring-2 focus:ring-[#4ecca3]/20"
-              />
-            </div>
-          </div>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader
+        icon={<ListIcon />}
+        title="360 Feedback Reviews"
+        subtitle="Track and manage multi-rater feedback cycles"
+      />
+
+      <div className="animate-fade-up-delay-1 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <div className="relative w-full min-w-[260px] max-w-[320px] sm:w-80">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" aria-hidden />
+          <input
+            type="search"
+            placeholder="Search participants by name or department..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-xl border border-[#dde5f5] bg-white py-2.5 pl-10 pr-4 text-sm text-[#0f2044] outline-none transition focus:border-[#4ecca3] focus:ring-2 focus:ring-[#4ecca3]/20"
+          />
         </div>
+      </div>
 
       {error && (
         <div
@@ -700,7 +708,7 @@ export default function Admin360Page() {
             borderRadius: "10px",
             background: "#fef2f2",
             border: "1px solid #fecaca",
-            marginBottom: "20px",
+            marginBottom: 0,
           }}
         >
           <div>
@@ -719,7 +727,7 @@ export default function Admin360Page() {
             borderRadius: "10px",
             background: "#f0fdf4",
             border: "1px solid #bbf7d0",
-            marginBottom: "20px",
+            marginBottom: 0,
           }}
         >
           <div>
@@ -729,8 +737,8 @@ export default function Admin360Page() {
         </div>
       )}
 
-        {loading ? (
-          <div className="flex flex-col gap-6">
+      {loading ? (
+        <div className="animate-fade-up-delay-2 flex flex-col gap-6">
             {[1, 2].map((card) => (
               <div key={card} className="overflow-hidden rounded-2xl border border-[#e8edf8] bg-white shadow-sm">
                 <div className="h-16 animate-pulse bg-[#e2e8f0]" />
@@ -741,17 +749,25 @@ export default function Admin360Page() {
                 </div>
               </div>
             ))}
-          </div>
+        </div>
         ) : cycles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#e8edf8] text-3xl text-[#94a3b8]">
-              ◎
+          <div className="animate-fade-up-delay-2">
+            <div
+              className="rounded-[14px] bg-white"
+              style={{
+                boxShadow: "var(--shadow-card)",
+                border: "1px solid var(--border-color)",
+              }}
+            >
+              <EmptyState
+                icon={<SearchIcon />}
+                title="No 360 cycles yet"
+                description="Create a feedback cycle to get started."
+              />
             </div>
-            <p className="text-base font-medium text-[#0f2044]">No 360 cycles yet</p>
-            <p className="mt-1 text-[13px] text-[#94a3b8]">Create a feedback cycle to get started</p>
           </div>
-        ) : (
-          <div className="flex flex-col gap-6">
+      ) : (
+        <div className="animate-fade-up-delay-2 flex flex-col gap-6">
             {cycles.map((c) => {
               const cached = cycleDataCache[c.id];
               const assignments = cached?.assignments;
@@ -1031,9 +1047,8 @@ export default function Admin360Page() {
                 </div>
               );
             })}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <AssignReviewerModal
         isOpen={!!assignTarget}

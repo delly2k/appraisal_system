@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { legacyRoleForRoles } from "@/lib/app-user-legacy-role";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -61,6 +62,7 @@ export async function PATCH(
         return NextResponse.json({ error: "Invalid roles (only hr/admin allowed)" }, { status: 400 });
       }
       updates.roles = roles;
+      updates.role = legacyRoleForRoles(roles);
     }
     if (employee_id !== undefined) updates.employee_id = employee_id || null;
     if (division_id !== undefined) updates.division_id = division_id || null;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { legacyRoleForRoles } from "@/lib/app-user-legacy-role";
 import { randomUUID } from "crypto";
 
 function getSupabaseAdmin() {
@@ -145,12 +146,14 @@ export async function POST(request: NextRequest) {
     }
 
     const aad_object_id = randomUUID();
+    const role = legacyRoleForRoles(roles);
     const { data: created, error } = await supabase
       .from("app_users")
       .insert({
         aad_object_id,
         email,
         display_name,
+        role,
         roles,
         employee_id,
         division_id,
