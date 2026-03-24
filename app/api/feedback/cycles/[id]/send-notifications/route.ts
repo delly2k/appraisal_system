@@ -27,7 +27,7 @@ function formatDate(dateStr: string | null): string {
 /**
  * POST /api/feedback/cycles/[id]/send-notifications
  * Manually send 360 review request emails to all reviewers for this cycle.
- * Uses SMTP from .env (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL).
+ * Uses Microsoft Graph (AZURE_AD_* and AZURE_FROM_EMAIL).
  * For testing: call this after activating a cycle that has participants/reviewers.
  */
 export async function POST(

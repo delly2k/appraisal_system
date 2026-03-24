@@ -1,8 +1,9 @@
 /**
  * Notification service for appraisal workflow.
- * Sends automated notifications via an email placeholder; replace with real
- * email (e.g. SendGrid, Resend, Nodemailer) when integrating.
+ * Email uses Microsoft Graph (lib/email.ts).
  */
+
+import { sendEmailViaGraph } from "@/lib/email";
 
 export type NotificationEvent =
   | "cycle_opened"
@@ -55,7 +56,7 @@ export interface HRDecisionRequiredPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Email placeholder – replace with real transport (SendGrid, Resend, etc.)
+// Email (Microsoft Graph)
 // ---------------------------------------------------------------------------
 
 export interface SendEmailOptions {
@@ -66,14 +67,17 @@ export interface SendEmailOptions {
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
-  const { to, subject, bodyText } = options;
-  // Placeholder: log in development; integrate with your email provider in production.
-  if (process.env.NODE_ENV !== "production") {
+  const { to, subject, bodyText, bodyHtml } = options;
+  const result = await sendEmailViaGraph({
+    to,
+    subject,
+    textContent: bodyText,
+    htmlContent: bodyHtml ?? null,
+  });
+  if (!result.success) {
     // eslint-disable-next-line no-console
-    console.log("[Notification placeholder]", { to, subject, body: bodyText.slice(0, 120) + "…" });
+    console.error("[email]", result.error);
   }
-  // TODO: call your email API, e.g.:
-  // await resend.emails.send({ from: process.env.EMAIL_FROM, to, subject, html: bodyHtml ?? bodyText });
 }
 
 function recipientEmail(r: Recipient | string): string {

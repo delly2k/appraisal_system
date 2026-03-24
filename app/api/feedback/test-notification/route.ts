@@ -4,10 +4,10 @@ import { sendFeedbackReviewRequest } from "@/lib/feedback-email";
 
 /**
  * POST /api/feedback/test-notification
- * Manually send a single test 360 review request email using SMTP from .env.
+ * Manually send a single test 360 review request email via Microsoft Graph.
  * Body: { "toEmail": "recipient@example.com" }
  * Uses sample content: Employee Name "Test Participant", Cycle "Leadership Feedback 2026", Deadline "—".
- * For testing SMTP configuration (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL).
+ * Requires AZURE_AD_* and AZURE_FROM_EMAIL (Mail.Send application permission).
  */
 export async function POST(req: NextRequest) {
   try {

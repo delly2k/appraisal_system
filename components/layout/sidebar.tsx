@@ -124,7 +124,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <GridIcon />, section: "main" },
   { href: "/appraisals", label: "My Appraisals", icon: <DocumentIcon />, section: "main" },
   { href: "/feedback", label: "360 Feedback", icon: <Feedback360Icon />, section: "main" },
-  { href: "/development-profile", label: "Development Profile", icon: <BoltIcon />, section: "main" },
+  { href: "/development", label: "Development Profile", icon: <BoltIcon />, section: "main", exactMatch: true },
   {
     href: "/admin/appraisals",
     label: "All Appraisals",
