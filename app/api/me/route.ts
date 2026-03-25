@@ -22,5 +22,6 @@ export async function GET() {
     roles: user.roles ?? [],
     employee_id: user.employee_id ?? null,
     division_id: user.division_id ?? null,
+    source: user.source ?? null,
   });
 }

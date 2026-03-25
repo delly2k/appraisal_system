@@ -9,25 +9,18 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-/** Returns true if current user (by employee_id) is the direct manager of the profile owner (by app user id). */
+/** True if current user (manager_employee_id) is the direct primary manager of the profile owner (employee_id). */
 async function isManagerOfProfileOwner(
   supabase: SupabaseClient<any>,
-  profileOwnerUserId: string,
+  profileOwnerEmployeeId: string,
   currentUserEmployeeId: string | null | undefined
 ): Promise<boolean> {
-  if (!currentUserEmployeeId) return false;
-  const { data: appUser } = await supabase
-    .from("app_users")
-    .select("employee_id")
-    .eq("id", profileOwnerUserId)
-    .maybeSingle();
-  const reportEmployeeId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
-  if (!reportEmployeeId) return false;
+  if (!currentUserEmployeeId || !profileOwnerEmployeeId) return false;
   const { data: lines } = await supabase
     .from("reporting_lines")
     .select("employee_id")
     .eq("manager_employee_id", currentUserEmployeeId)
-    .eq("employee_id", reportEmployeeId)
+    .eq("employee_id", profileOwnerEmployeeId)
     .eq("is_primary", true)
     .limit(1);
   return (lines?.length ?? 0) > 0;
@@ -58,13 +51,17 @@ export async function PATCH(
     };
     if (typeof eip_issued === "boolean") {
       payload.eip_issued = eip_issued;
-      payload.eip_set_by = user.id;
+      if (user.source === "app_users") {
+        payload.eip_set_by = user.id;
+      }
       payload.eip_set_at = new Date().toISOString();
     }
     if (typeof eip_next_fy === "boolean") payload.eip_next_fy = eip_next_fy;
     if (typeof manager_ld_notes === "string" || manager_ld_notes === null) {
       payload.manager_ld_notes = manager_ld_notes;
-      payload.manager_notes_by = user.id;
+      if (user.source === "app_users") {
+        payload.manager_notes_by = user.id;
+      }
       payload.manager_notes_at = new Date().toISOString();
     }
 

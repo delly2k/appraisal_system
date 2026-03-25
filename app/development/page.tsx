@@ -3,12 +3,12 @@ import { DevelopmentProfileLoader } from "@/components/development-profile-form"
 
 export default async function DevelopmentPage() {
   const user = await getCurrentUser();
-  const hasEmployeeLink = !!user?.employee_id;
-  const userId = user?.id ?? null;
+  const employeeId = user?.employee_id ?? null;
+  const hasEmployeeLink = !!employeeId;
 
   return (
     <div style={{ animation: "fadeUp 0.4s ease both" }}>
-      {!userId ? (
+      {!user ? (
         <div className="rounded-[14px] border border-[#dde5f5] bg-white shadow-[0_2px_12px_rgba(15,31,61,.07),0_0_1px_rgba(15,31,61,.1)] p-6">
           <p className="text-[13px] text-[#8a97b8] m-0">
             Please sign in to view your development profile.
@@ -22,7 +22,7 @@ export default async function DevelopmentPage() {
           </p>
         </div>
       ) : (
-        <DevelopmentProfileLoader userId={userId} />
+        <DevelopmentProfileLoader userId={employeeId!} />
       )}
     </div>
   );

@@ -85,7 +85,11 @@ function getBreadcrumb(pathname: string): { parent: string | null; current: stri
   if (label) {
     return { parent: "Home", current: label };
   }
-  
+
+  if (pathname.startsWith("/development/eq")) {
+    return { parent: "Development Profile", current: "EQ Assessment" };
+  }
+
   if (pathname.startsWith("/appraisals/")) {
     return { parent: "My Appraisals", current: "Appraisal Details" };
   }

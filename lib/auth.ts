@@ -22,6 +22,8 @@ export interface AuthUser {
   division_id?: string | null;
   /** Temporary fallback while app_users.role exists during migration window. */
   role?: string | null;
+  /** Where `id` comes from: app portal account vs HR employee record only. */
+  source?: "app_users" | "employees";
 }
 
 /** Default placeholder user when no seed user is configured. */
@@ -56,27 +58,19 @@ export function isPlaceholderUser(user: AuthUser | null): boolean {
 
 /**
  * Get the current user.
- * Uses NextAuth session when signed in; else SEED_USER_EMAIL; else placeholder.
- * When session exists but user is not in app_users, resolves from local employees by email.
- * If not in employees, resolves from Dynamics 365 (resolveUserFromDynamics) and then reads from employees.
+ * HR/admin: row in app_users → `id` is app_users UUID.
+ * Regular employees: no app_users row → `id` is employees.employee_id (Dynamics id), never the email string.
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const session = await getServerSession(authOptions);
-  const email = session?.user?.email ?? process.env.SEED_USER_EMAIL?.trim();
+  const sessionEmail = session?.user?.email?.trim();
+  const seedEmail = process.env.SEED_USER_EMAIL?.trim();
+  const email = sessionEmail ?? seedEmail;
   if (!email) return PLACEHOLDER_USER;
 
   const supabase = getSupabaseService();
   if (!supabase) {
-    return session?.user
-      ? {
-          id: session.user.email ?? "session",
-          email: session.user.email ?? null,
-          name: session.user.name ?? session.user.email ?? null,
-          roles: ["employee"],
-          employee_id: null,
-          division_id: null,
-        }
-      : PLACEHOLDER_USER;
+    return session?.user ? null : PLACEHOLDER_USER;
   }
 
   const { data: row, error } = await supabase
@@ -119,13 +113,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       employee_id,
       division_id,
       role: fallbackRole,
+      source: "app_users",
     };
   }
 
   if (session?.user) {
     let { data: emp } = await supabase
       .from("employees")
-      .select("employee_id, full_name, division_id")
+      .select("employee_id, full_name, email, division_id")
       .ilike("email", email)
       .eq("is_active", true)
       .maybeSingle();
@@ -143,32 +138,90 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       }
       const retry = await supabase
         .from("employees")
-        .select("employee_id, full_name, division_id")
+        .select("employee_id, full_name, email, division_id")
         .ilike("email", email)
         .eq("is_active", true)
         .maybeSingle();
       emp = retry.data;
     }
 
+    if (!emp?.employee_id) {
+      console.warn(`[auth] No app_users or employees record for: ${email}`);
+      return null;
+    }
+
     return {
-      id: session.user.email ?? "session",
-      email: session.user.email ?? null,
-      name: (emp?.full_name ?? session.user.name ?? session.user.email) ?? null,
+      id: emp.employee_id,
+      email: emp.email ?? session.user.email ?? null,
+      name: (emp.full_name ?? session.user.name ?? session.user.email) ?? null,
       roles: ["employee"],
-      employee_id: emp?.employee_id ?? null,
-      division_id: emp?.division_id ?? null,
+      employee_id: emp.employee_id,
+      division_id: emp.division_id ?? null,
+      source: "employees",
     };
   }
 
-  // No session but we have email (e.g. SEED_USER_EMAIL) — return user with that email so reporting/Dynamics can resolve by it
-  if (email) {
+  // SEED_USER_EMAIL (no session): resolve from DB so `id` is never a bare email string
+  const { data: seedEmp } = await supabase
+    .from("employees")
+    .select("employee_id, full_name, email, division_id")
+    .ilike("email", email)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (seedEmp?.employee_id) {
     return {
-      id: `seed-${email}`,
-      email,
-      name: email.split("@")[0] ?? email,
+      id: seedEmp.employee_id,
+      email: seedEmp.email ?? email,
+      name: seedEmp.full_name ?? email.split("@")[0] ?? email,
       roles: ["employee"],
-      employee_id: null,
-      division_id: null,
+      employee_id: seedEmp.employee_id,
+      division_id: seedEmp.division_id ?? null,
+      source: "employees",
+    };
+  }
+
+  const { data: seedApp } = await supabase
+    .from("app_users")
+    .select("id, email, display_name, role, roles, employee_id, division_id")
+    .ilike("email", email)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (seedApp) {
+    let employee_id = seedApp.employee_id ?? null;
+    let division_id = seedApp.division_id ?? null;
+    if (!employee_id) {
+      const { data: emp } = await supabase
+        .from("employees")
+        .select("employee_id, division_id")
+        .ilike("email", email)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (emp) {
+        employee_id = emp.employee_id ?? null;
+        division_id = emp.division_id ?? null;
+      }
+    }
+    const dbRoles = Array.isArray((seedApp as { roles?: unknown }).roles)
+      ? ((seedApp as { roles?: unknown[] }).roles ?? []).map((r) => String(r))
+      : [];
+    const fallbackRole = typeof seedApp.role === "string" ? seedApp.role : null;
+    const resolvedRoles =
+      dbRoles.length > 0
+        ? dbRoles
+        : fallbackRole && fallbackRole !== "individual"
+          ? [fallbackRole]
+          : [];
+    return {
+      id: seedApp.id,
+      email: seedApp.email ?? null,
+      name: seedApp.display_name ?? seedApp.email ?? null,
+      roles: resolvedRoles.map((r) => toUserRole(r)),
+      employee_id,
+      division_id,
+      role: fallbackRole,
+      source: "app_users",
     };
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { AuthUser } from "@/lib/auth";
 import { getCurrentUser } from "@/lib/auth";
 
 function getSupabase() {
@@ -9,23 +10,21 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-async function isManagerOf(
+function isHrOrAdmin(user: AuthUser): boolean {
+  const set = new Set(user.roles.map((r) => String(r).toLowerCase()));
+  return set.has("hr") || set.has("admin") || set.has("super_admin");
+}
+
+async function isManagerOfEmployee(
   supabase: SupabaseClient<any>,
-  profileOwnerUserId: string,
-  currentUserEmployeeId: string | null | undefined
+  reportEmployeeId: string,
+  managerEmployeeId: string | null | undefined
 ): Promise<boolean> {
-  if (!currentUserEmployeeId) return false;
-  const { data: appUser } = await supabase
-    .from("app_users")
-    .select("employee_id")
-    .eq("id", profileOwnerUserId)
-    .maybeSingle();
-  const reportEmployeeId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
-  if (!reportEmployeeId) return false;
+  if (!managerEmployeeId || !reportEmployeeId) return false;
   const { data: lines } = await supabase
     .from("reporting_lines")
     .select("employee_id")
-    .eq("manager_employee_id", currentUserEmployeeId)
+    .eq("manager_employee_id", managerEmployeeId)
     .eq("employee_id", reportEmployeeId)
     .eq("is_primary", true)
     .limit(1);
@@ -45,6 +44,13 @@ export async function GET(
 
     const supabase = getSupabase();
 
+    const isOwn = user.employee_id != null && user.employee_id === employeeId;
+    const isElevated = isHrOrAdmin(user);
+    const isMgr = await isManagerOfEmployee(supabase, employeeId, user.employee_id ?? undefined);
+    if (!isOwn && !isElevated && !isMgr) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { data: profile, error: profileErr } = await supabase
       .from("employee_development_profiles")
       .select("*")
@@ -53,13 +59,7 @@ export async function GET(
 
     if (profileErr) return NextResponse.json({ error: profileErr.message }, { status: 500 });
 
-    const { data: appUser } = await supabase
-      .from("app_users")
-      .select("employee_id")
-      .eq("id", employeeId)
-      .maybeSingle();
-
-    const empId = (appUser as { employee_id?: string } | null)?.employee_id ?? null;
+    const empId = employeeId;
     let cycles: { id: string; fiscal_year: string; status: string; updated_at: string }[] = [];
     let employee: { full_name: string; division: string } | null = null;
 
@@ -80,7 +80,7 @@ export async function GET(
       employee = { full_name: "Unknown", division: "—" };
     }
 
-    const isManager = await isManagerOf(supabase, employeeId, user.employee_id ?? undefined);
+    const isManager = await isManagerOfEmployee(supabase, employeeId, user.employee_id ?? undefined);
 
     if (empId) {
       const { data: rows } = await supabase
@@ -113,6 +113,21 @@ export async function GET(
     }
 
     let activeAppraisal: { id: string; fiscal_year: string } | null = null;
+    let eqResult: {
+      id: string;
+      taken_at: string;
+      sa_total: number;
+      me_total: number;
+      mo_total: number;
+      e_total: number;
+      ss_total: number;
+      total_score: number;
+    } | null = null;
+    let eqDraft: {
+      responses: Record<string, number> | null;
+      last_page: number | null;
+      updated_at: string | null;
+    } | null = null;
     if (empId) {
       const { data: openRows } = await supabase
         .from("appraisals")
@@ -133,7 +148,42 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ profile: profile ?? null, cycles, employee, isManager, activeAppraisal });
+    const { data: eqRow } = await supabase
+      .from("eq_results")
+      .select("id, taken_at, sa_total, me_total, mo_total, e_total, ss_total, total_score")
+      .eq("employee_id", employeeId)
+      .order("taken_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (eqRow) {
+      eqResult = {
+        id: String(eqRow.id),
+        taken_at: String(eqRow.taken_at),
+        sa_total: Number(eqRow.sa_total),
+        me_total: Number(eqRow.me_total),
+        mo_total: Number(eqRow.mo_total),
+        e_total: Number(eqRow.e_total),
+        ss_total: Number(eqRow.ss_total),
+        total_score: Number(eqRow.total_score),
+      };
+    }
+
+    const { data: draftRow } = await supabase
+      .from("eq_drafts")
+      .select("responses, last_page, updated_at")
+      .eq("employee_id", employeeId)
+      .maybeSingle();
+
+    if (draftRow) {
+      eqDraft = {
+        responses: (draftRow.responses as Record<string, number> | null) ?? null,
+        last_page: (draftRow.last_page as number | null) ?? null,
+        updated_at: (draftRow.updated_at as string | null) ?? null,
+      };
+    }
+
+    return NextResponse.json({ profile: profile ?? null, cycles, employee, isManager, activeAppraisal, eqResult, eqDraft });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -20,7 +20,7 @@ export async function PATCH(
     const { employeeId } = await params;
     if (!employeeId) return NextResponse.json({ error: "employeeId required" }, { status: 400 });
 
-    if (user.id !== employeeId) {
+    if (user.employee_id !== employeeId) {
       return NextResponse.json({ error: "You can only update your own development profile" }, { status: 403 });
     }
 
@@ -39,9 +39,11 @@ export async function PATCH(
     const supabase = getSupabase();
 
     const payload: Record<string, unknown> = {
-      last_updated_by: user.id,
       last_updated_at: new Date().toISOString(),
     };
+    if (user.source === "app_users") {
+      payload.last_updated_by = user.id;
+    }
     if (typeof employee_ld_comments === "string" || employee_ld_comments === null) payload.employee_ld_comments = employee_ld_comments;
     if (Array.isArray(skills)) payload.skills = skills;
     if (typeof career_role === "string" || career_role === null) payload.career_role = career_role;
