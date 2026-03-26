@@ -1102,7 +1102,7 @@ export function DashboardDbjClient({
             <StatCardDbj
               label="Total employees"
               value={hrStats.total_employees}
-              sub="Active in directory"
+              sub={hrStats.total_employees_subtitle}
               tone="navy"
             />
             <StatCardDbj
@@ -1478,7 +1478,7 @@ export function DashboardDbjClient({
                   </thead>
                   <tbody>
                     {hrStats.division_breakdown.map((row) => (
-                      <tr key={row.division}>
+                      <tr key={row.rowKey}>
                         <td style={{ padding: "10px 16px", fontSize: 12, color: NAVY, borderTop: "1px solid #f0f4fa" }}>
                           {row.division}
                         </td>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getAppraisalsAll,
@@ -37,6 +38,12 @@ const SearchIcon = () => (
   </svg>
 );
 
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  return createSupabaseClient(url, key);
+}
+
 export default async function AdminAppraisalsPage({
   searchParams,
 }: {
@@ -59,6 +66,26 @@ export default async function AdminAppraisalsPage({
 
   const { items, total } = await getAppraisalsAll(options);
   const cycleOptions = await getAppraisalCycleOptions();
+  const supabase = getSupabaseAdmin();
+
+  const { data: activeCycle } = await supabase
+    .from("appraisal_cycles")
+    .select("id, name")
+    .in("status", ["active", "open"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: lastSync } = await supabase
+    .from("employee_sync_log")
+    .select("new_employee_ids, triggered_at")
+    .eq("status", "completed")
+    .order("triggered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const newWithoutAppraisal = Array.isArray(lastSync?.new_employee_ids)
+    ? lastSync.new_employee_ids
+    : [];
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -68,6 +95,39 @@ export default async function AdminAppraisalsPage({
         title="All Appraisals"
         subtitle="View and search all appraisals across the organisation"
       />
+
+      {newWithoutAppraisal.length > 0 && (
+        <div
+          className="mb-4 flex items-center justify-between rounded-[10px] border px-4 py-3"
+          style={{
+            borderColor: "#fcd34d",
+            background: "#fffbeb",
+          }}
+        >
+          <div className="flex items-center gap-2.5">
+            <svg className="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div>
+              <p className="text-[12.5px] font-semibold" style={{ color: "#92400e" }}>
+                {newWithoutAppraisal.length} employee{newWithoutAppraisal.length > 1 ? "s" : ""} added since cycle started without an appraisal
+              </p>
+              <p className="mt-0.5 text-[11px]" style={{ color: "#a16207" }}>
+                These employees are in Dynamics but have no appraisal record for {activeCycle?.name ?? "the active cycle"}
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/admin/appraisals/create-missing"
+            className="flex-shrink-0 rounded-[7px] px-4 py-1.5 text-[12px] font-semibold text-white"
+            style={{ background: "#d97706" }}
+          >
+            Create appraisals →
+          </Link>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="animate-fade-up-delay-1">

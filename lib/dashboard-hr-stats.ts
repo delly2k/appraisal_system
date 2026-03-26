@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolveDivisionNames } from "@/lib/dynamics-divisions";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -17,6 +18,8 @@ export interface ScoreDistributionBucket {
 }
 
 export interface DivisionBreakdownRow {
+  /** Stable id for React keys (division GUID or internal sentinel); not shown in UI. */
+  rowKey: string;
   division: string;
   employees: number;
   avgScore: number | null;
@@ -34,6 +37,8 @@ export interface RecentActivityItem {
 
 export interface HrDashboardStats {
   total_employees: number;
+  /** Subtitle for the total employees stat (e.g. enrolled-in-cycle copy). */
+  total_employees_subtitle: string;
   appraisals_by_stage: Record<string, number>;
   score_distribution: ScoreDistributionBucket[];
   mean_score: number | null;
@@ -71,20 +76,72 @@ function bucketColor(min: number): string {
   return "#ef4444";
 }
 
+const UNASSIGNED_DIV = "__unassigned__";
+
+/** Prefer the open appraisal cycle; else the cycle with the most active appraisals. */
+async function resolveBreakdownCycleId(
+  supabase: ReturnType<typeof getSupabase>,
+  apps: { cycle_id: string }[]
+): Promise<string | null> {
+  const { data: openRow } = await supabase
+    .from("appraisal_cycles")
+    .select("id")
+    .eq("status", "open")
+    .order("end_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (openRow?.id) return openRow.id as string;
+
+  let best: string | null = null;
+  let bestN = 0;
+  const counts = new Map<string, number>();
+  for (const a of apps) {
+    const c = a.cycle_id as string;
+    counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  for (const [cid, n] of counts) {
+    if (n > bestN) {
+      best = cid;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 export async function fetchHrDashboardStats(): Promise<HrDashboardStats> {
   const supabase = getSupabase();
 
-  const { count: totalEmployees } = await supabase
-    .from("employees")
-    .select("employee_id", { count: "exact", head: true })
-    .eq("is_active", true);
-
   const { data: appraisals } = await supabase
     .from("appraisals")
-    .select("id, employee_id, status, cycle_id, updated_at")
+    .select("id, employee_id, status, cycle_id, updated_at, division_id")
     .eq("is_active", true);
 
   const apps = appraisals ?? [];
+
+  const breakdownCycleId = await resolveBreakdownCycleId(supabase, apps);
+  let enrolledCycleName: string | null = null;
+  if (breakdownCycleId) {
+    const { data: cyc } = await supabase
+      .from("appraisal_cycles")
+      .select("name")
+      .eq("id", breakdownCycleId)
+      .maybeSingle();
+    enrolledCycleName = (cyc?.name as string | undefined)?.trim() || null;
+  }
+
+  const appsForBreakdown = apps.filter((a) => {
+    const st = String(a.status ?? "").toUpperCase();
+    if (st === "CANCELLED") return false;
+    if (breakdownCycleId && a.cycle_id !== breakdownCycleId) return false;
+    return true;
+  });
+
+  const totalEmployees = new Set(appsForBreakdown.map((a) => String(a.employee_id))).size;
+  const totalEmployeesSubtitle = enrolledCycleName
+    ? `Enrolled in ${enrolledCycleName}`
+    : breakdownCycleId
+      ? "Enrolled in appraisal cycle"
+      : "Enrolled in appraisal program (all cycles)";
   const byStage: Record<string, number> = {};
   for (const s of STAGE_FILTERS) {
     byStage[s] = 0;
@@ -155,24 +212,6 @@ export async function fetchHrDashboardStats(): Promise<HrDashboardStats> {
     }
   }
 
-  const { data: emps } = await supabase
-    .from("employees")
-    .select("employee_id, division_name")
-    .eq("is_active", true);
-
-  const divisionToEmployees = new Map<string, string[]>();
-  for (const e of emps ?? []) {
-    const div = (e.division_name as string)?.trim() || "Unassigned";
-    if (!divisionToEmployees.has(div)) divisionToEmployees.set(div, []);
-    divisionToEmployees.get(div)!.push(e.employee_id as string);
-  }
-
-  const empToAppraisal = new Map<string, (typeof apps)[0][]>();
-  for (const a of apps) {
-    if (!empToAppraisal.has(a.employee_id)) empToAppraisal.set(a.employee_id, []);
-    empToAppraisal.get(a.employee_id)!.push(a);
-  }
-
   const scoreByAppraisal = new Map<string, number>();
   if (appraisalIds.length > 0) {
     const { data: scr } = await supabase
@@ -184,33 +223,81 @@ export async function fetchHrDashboardStats(): Promise<HrDashboardStats> {
     }
   }
 
+  const empIdsMissingDiv = [
+    ...new Set(
+      appsForBreakdown
+        .filter((a) => !(a as { division_id?: string | null }).division_id?.toString().trim())
+        .map((a) => a.employee_id as string)
+    ),
+  ];
+  const employeeDivisionById = new Map<string, string>();
+  if (empIdsMissingDiv.length > 0) {
+    const { data: empRows } = await supabase
+      .from("employees")
+      .select("employee_id, division_id")
+      .in("employee_id", empIdsMissingDiv);
+    for (const e of empRows ?? []) {
+      const did = (e.division_id as string | null)?.trim();
+      if (did) employeeDivisionById.set(e.employee_id as string, did);
+    }
+  }
+
+  type DivAgg = { divisionKey: string; appraisalIds: string[]; statuses: string[] };
+  const divisionMap = new Map<string, DivAgg>();
+  for (const a of appsForBreakdown) {
+    const rowDiv = (a as { division_id?: string | null }).division_id?.toString().trim();
+    const fallbackDiv = employeeDivisionById.get(a.employee_id as string)?.trim();
+    const divisionKey =
+      rowDiv || fallbackDiv || UNASSIGNED_DIV;
+    let agg = divisionMap.get(divisionKey);
+    if (!agg) {
+      agg = { divisionKey, appraisalIds: [], statuses: [] };
+      divisionMap.set(divisionKey, agg);
+    }
+    agg.appraisalIds.push(a.id as string);
+    agg.statuses.push((a.status as string) || "DRAFT");
+  }
+
+  const guidKeys = [...divisionMap.keys()].filter((k) => k !== UNASSIGNED_DIV);
+  let nameByGuid = new Map<string, string>();
+  try {
+    nameByGuid = await resolveDivisionNames(guidKeys);
+  } catch (e) {
+    console.error("[dashboard-hr-stats] Dynamics division names failed:", e);
+  }
+
   const division_breakdown: DivisionBreakdownRow[] = [];
-  for (const [division, empIds] of divisionToEmployees) {
-    let sum = 0;
-    let n = 0;
+  for (const agg of divisionMap.values()) {
     let completed = 0;
     let inProg = 0;
-    for (const eid of empIds) {
-      const list = empToAppraisal.get(eid) ?? [];
-      for (const ap of list) {
-        if (ap.status === "COMPLETE") completed++;
-        else if (ap.status !== "DRAFT") inProg++;
-        const ts = scoreByAppraisal.get(ap.id);
-        if (ts != null && !Number.isNaN(ts)) {
-          sum += ts;
-          n++;
-        }
+    for (const st of agg.statuses) {
+      const u = String(st ?? "").toUpperCase();
+      if (u === "COMPLETE") completed++;
+      else if (u !== "DRAFT" && u !== "COMPLETE" && u !== "CANCELLED") inProg++;
+    }
+    let sum = 0;
+    let n = 0;
+    for (const aid of agg.appraisalIds) {
+      const ts = scoreByAppraisal.get(aid);
+      if (ts != null && !Number.isNaN(ts)) {
+        sum += ts;
+        n++;
       }
     }
+    const displayName =
+      agg.divisionKey === UNASSIGNED_DIV
+        ? "Unassigned"
+        : nameByGuid.get(agg.divisionKey) ?? "Unknown division";
     division_breakdown.push({
-      division,
-      employees: empIds.length,
+      rowKey: agg.divisionKey,
+      division: displayName,
+      employees: agg.appraisalIds.length,
       avgScore: n > 0 ? Math.round((sum / n) * 10) / 10 : null,
       completed,
       inProgress: inProg,
     });
   }
-  division_breakdown.sort((a, b) => a.division.localeCompare(b.division));
+  division_breakdown.sort((a, b) => b.employees - a.employees || a.division.localeCompare(b.division));
 
   const { data: timeline } = await supabase
     .from("appraisal_timeline")
@@ -261,7 +348,8 @@ export async function fetchHrDashboardStats(): Promise<HrDashboardStats> {
   }
 
   return {
-    total_employees: totalEmployees ?? 0,
+    total_employees: totalEmployees,
+    total_employees_subtitle: totalEmployeesSubtitle,
     appraisals_by_stage: byStage as unknown as Record<string, number>,
     score_distribution: buckets,
     mean_score: meanScore != null ? Math.round(meanScore * 10) / 10 : null,

@@ -1,6 +1,7 @@
 import type { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { createClient } from "@supabase/supabase-js";
+import { createDataverseApiClient } from "@/lib/dynamics-sync";
 
 function getSupabaseService() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -29,28 +30,56 @@ export const authOptions: NextAuthOptions = {
         const p = profile as { email?: string; name?: string };
         token.email = p?.email ?? token.email;
         token.name = p?.name ?? token.name;
-        const supabase = getSupabaseService();
-        if (supabase && token.email) {
-          const { data } = await supabase
-            .from("app_users")
-            .select("roles, role, employee_id, division_id")
-            .ilike("email", String(token.email))
-            .maybeSingle();
-          const dbRoles = Array.isArray(data?.roles) ? data.roles.map((r) => String(r)) : [];
-          const fallbackRole = typeof data?.role === "string" ? data.role : null;
-          token.roles =
-            dbRoles.length > 0
-              ? dbRoles
-              : fallbackRole && fallbackRole !== "individual"
-                ? [fallbackRole]
-                : [];
-          token.employee_id = data?.employee_id ?? null;
-          token.division_id = data?.division_id ?? null;
-        } else {
-          token.roles = [];
+      }
+
+      const supabase = getSupabaseService();
+      if (token.email) {
+        // Identity from Dynamics HRMIS (systemusers) only.
+        try {
+          const client = await createDataverseApiClient();
+          const email = String(token.email).trim().replace(/'/g, "''");
+          const baseFilter = `internalemailaddress eq '${email}' and isdisabled eq false`;
+
+          let hrmisUser: { systemuserid?: string | null; _xrm1_division_value?: string | null } | null = null;
+          try {
+            const withDivision = await client.get<{
+              value?: Array<{ systemuserid?: string | null; _xrm1_division_value?: string | null }>;
+            }>(
+              `/systemusers?$select=systemuserid,_xrm1_division_value&$filter=${encodeURIComponent(baseFilter)}&$top=1`
+            );
+            hrmisUser = withDivision.data?.value?.[0] ?? null;
+          } catch {
+            // Fallback if custom division field is not present in this Dataverse schema.
+            const basic = await client.get<{ value?: Array<{ systemuserid?: string | null }> }>(
+              `/systemusers?$select=systemuserid&$filter=${encodeURIComponent(baseFilter)}&$top=1`
+            );
+            const u = basic.data?.value?.[0];
+            hrmisUser = u ? { systemuserid: u.systemuserid ?? null, _xrm1_division_value: null } : null;
+          }
+
+          token.employee_id = hrmisUser?.systemuserid ?? null;
+          token.division_id = hrmisUser?._xrm1_division_value ?? null;
+        } catch (e) {
+          console.warn("[auth] HRMIS lookup failed:", e);
           token.employee_id = null;
           token.division_id = null;
         }
+      } else {
+        token.employee_id = null;
+        token.division_id = null;
+      }
+
+      if (supabase && token.email) {
+        // Roles from app_users only.
+        const { data: appUser } = await supabase
+          .from("app_users")
+          .select("roles")
+          .ilike("email", String(token.email))
+          .maybeSingle();
+
+        token.roles = Array.isArray(appUser?.roles) ? appUser.roles.map((r) => String(r)) : [];
+      } else {
+        token.roles = [];
       }
       return token;
     },

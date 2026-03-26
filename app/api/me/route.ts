@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
-import { getCurrentUser } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * GET /api/me
@@ -11,17 +11,26 @@ import { getCurrentUser } from "@/lib/auth";
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   }
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const supabase = createClient();
+  const email = session.user.email;
+  const employeeId = (session.user.employee_id as string | null | undefined) ?? null;
+  const divisionId = (session.user.division_id as string | null | undefined) ?? null;
+
+  // Roles/elevation from app_users only.
+  const { data: appUser } = await supabase
+    .from("app_users")
+    .select("roles")
+    .ilike("email", email)
+    .maybeSingle();
+
   return NextResponse.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    roles: user.roles ?? [],
-    employee_id: user.employee_id ?? null,
-    division_id: user.division_id ?? null,
-    source: user.source ?? null,
+    email,
+    name: session.user.name ?? null,
+    employee_id: employeeId,
+    division_id: divisionId,
+    roles: Array.isArray(appUser?.roles) ? appUser.roles : [],
   });
 }

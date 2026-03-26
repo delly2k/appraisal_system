@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 
-const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.1.0";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.3.0";
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
