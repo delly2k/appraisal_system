@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Send, UserCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -308,15 +307,6 @@ export function FeedbackReviewForm({
             </button>
           </div>
         </div>
-      )}
-
-      {isSubmitted && (
-        <Link
-          href={`/feedback/cycles/${cycleId}`}
-          className="inline-flex items-center rounded-[8px] border-[1.5px] border-[#dde5f5] bg-white px-4 py-2 text-[12px] font-semibold text-[#4a5a82] hover:border-[#0f1f3d] transition-all"
-        >
-          Back to cycle
-        </Link>
       )}
     </div>
   );

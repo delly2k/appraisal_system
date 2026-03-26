@@ -1,17 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { AxiosResponse } from "axios";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getAllEmployees } from "@/lib/dynamics-org-service";
+import { createDataverseApiClient } from "@/lib/dynamics-sync";
 
 type DynamicsEmployeeRow = {
   xrm1_employeeid?: string | null;
   _xrm1_employee_user_id_value?: string | null;
   xrm1_fullname?: string | null;
-  xrm1_first_name?: string | null;
-  xrm1_last_name?: string | null;
   emailaddress?: string | null;
-  internalemailaddress?: string | null;
-  _dbjhr_divisions_value?: string | null;
+  _xrm1_employee_department_id_value?: string | null;
+  statecode?: number | null;
+  xrm1_employee_type?: number | null;
+};
+
+/** OData envelope for paged xrm1_employees queries. */
+type XrmEmployeeODataPage = {
+  value?: DynamicsEmployeeRow[];
+  "@odata.nextLink"?: string;
+};
+
+type EmployeeUpsertRow = {
+  employee_id: string;
+  full_name: string | null;
+  email: string | null;
+  division_id: string | null;
+  is_active: boolean;
 };
 
 function normalizeRole(r: string): string {
@@ -84,8 +98,24 @@ export async function POST(req: NextRequest) {
   const logId = logRow?.id as string | undefined;
 
   try {
-    const allEmployees = (await getAllEmployees()) as DynamicsEmployeeRow[];
-    console.log(`[sync] fetched ${allEmployees.length} xrm1_employees from Dynamics`);
+    const client = await createDataverseApiClient();
+    const allEmployees: DynamicsEmployeeRow[] = [];
+    let nextUrl: string | null =
+      `/xrm1_employees` +
+      `?$select=xrm1_employeeid,_xrm1_employee_user_id_value,xrm1_fullname,emailaddress,_xrm1_employee_department_id_value,statecode,xrm1_employee_type` +
+      `&$filter=statecode eq 0` +
+      `&$top=500`;
+
+    while (nextUrl) {
+      const res: AxiosResponse<XrmEmployeeODataPage> = await client.get<XrmEmployeeODataPage>(
+        nextUrl.startsWith("http") ? nextUrl : nextUrl
+      );
+      const page = res.data?.value ?? [];
+      allEmployees.push(...page);
+      const nextPageUrl: string | null = res.data?.["@odata.nextLink"] ?? null;
+      nextUrl = nextPageUrl ? nextPageUrl.replace(/^.*\/api\/data\/v[\d.]+/, "") : null;
+    }
+    console.log(`[sync] fetched ${allEmployees.length} active employees from xrm1_employees`);
 
     const { data: existingBefore } = await supabase
       .from("employees")
@@ -103,28 +133,93 @@ export async function POST(req: NextRequest) {
         .filter(Boolean)
     );
 
-    const rows = allEmployees
+    const rows: EmployeeUpsertRow[] = allEmployees
+      .filter((e) => {
+        const email = sanitizeEmail(e.emailaddress);
+        return !!email && email.endsWith("@dbankjm.com");
+      })
       .map((e) => ({
+        // Appraisals reference employees.employee_id using the Dynamics *systemuser* id
+        // (_xrm1_employee_user_id_value). See lib/appraisal-generator.ts.
         employee_id: String(e._xrm1_employee_user_id_value ?? "").trim(),
-        full_name:
-          String(e.xrm1_fullname ?? "").trim() ||
-          [e.xrm1_first_name, e.xrm1_last_name].filter(Boolean).map((x) => String(x).trim()).join(" ") ||
-          null,
-        email: sanitizeEmail(e.internalemailaddress ?? e.emailaddress),
-        division_id: e._dbjhr_divisions_value ? String(e._dbjhr_divisions_value) : null,
+        full_name: String(e.xrm1_fullname ?? "").trim() || null,
+        email: sanitizeEmail(e.emailaddress),
+        division_id: e._xrm1_employee_department_id_value ? String(e._xrm1_employee_department_id_value) : null,
         is_active: true,
       }))
-      .filter((r) => !!r.employee_id)
-      .filter((r) => !!r.employee_id && isDbjEmail(r.email));
+      .filter((r) => !!r.employee_id);
 
     console.log(`[sync] after @dbankjm.com filter: ${rows.length} employees`);
 
-    if (rows.length > 0) {
-      const { error } = await supabase.from("employees").upsert(rows, { onConflict: "employee_id" });
-      if (error) throw new Error(error.message);
+    const emailSeen = new Map<string, EmployeeUpsertRow>();
+    for (const row of rows) {
+      const emailKey = sanitizeEmail(row.email);
+      if (!emailKey) continue;
+      const existing = emailSeen.get(emailKey);
+      if (!existing) {
+        emailSeen.set(emailKey, row);
+        continue;
+      }
+      console.warn(
+        `[sync] duplicate email skipped: ${row.email} — keeping ${existing.employee_id}, skipping ${row.employee_id}`
+      );
+    }
+    const deduplicatedRows = Array.from(emailSeen.values());
+    console.log(
+      `[sync] after dedup: ${deduplicatedRows.length} unique employees (${rows.length - deduplicatedRows.length} duplicates removed)`
+    );
+
+    const syncedEmployeeIds = new Set<string>();
+
+    if (deduplicatedRows.length > 0) {
+      for (const row of deduplicatedRows) {
+        const { error } = await supabase.from("employees").upsert(row, { onConflict: "employee_id" });
+        if (!error) {
+          syncedEmployeeIds.add(row.employee_id);
+          continue;
+        }
+
+        if (error.message.includes("employees_email_key") || error.message.toLowerCase().includes("email")) {
+          console.warn(
+            `[sync] email conflict for ${row.email} — updating existing record without changing employee_id`
+          );
+          const { data: existingByEmail } = await supabase
+            .from("employees")
+            .select("employee_id")
+            .ilike("email", row.email ?? "")
+            .maybeSingle();
+          const existingEmployeeId = String(existingByEmail?.employee_id ?? "").trim();
+
+          // Only re-key employee_id when it is safe (no appraisals depend on the old id).
+          // This prevents FK violations like appraisals_employee_id_fkey.
+          let canRekeyEmployeeId = false;
+          if (existingEmployeeId) {
+            const { count: appraisalCount } = await supabase
+              .from("appraisals")
+              .select("id", { count: "exact", head: true })
+              .eq("employee_id", existingEmployeeId);
+            canRekeyEmployeeId = (appraisalCount ?? 0) === 0;
+          }
+
+          const { error: updateErr } = await supabase
+            .from("employees")
+            .update({
+              ...(canRekeyEmployeeId ? { employee_id: row.employee_id } : {}),
+              full_name: row.full_name,
+              division_id: row.division_id,
+              is_active: row.is_active,
+            })
+            .ilike("email", row.email ?? "");
+          if (updateErr) throw new Error(updateErr.message);
+          syncedEmployeeIds.add(canRekeyEmployeeId ? row.employee_id : existingEmployeeId);
+          continue;
+        }
+
+        throw new Error(error.message);
+      }
     }
 
-    const fetchedIds = new Set(rows.map((r) => r.employee_id));
+    const fetchedIds = syncedEmployeeIds;
     const toDeactivate = Array.from(existingActiveIds).filter((id) => !fetchedIds.has(id));
     if (toDeactivate.length > 0) {
       const { error: deactivateErr } = await supabase
@@ -150,12 +245,12 @@ export async function POST(req: NextRequest) {
         .eq("cycle_id", activeCycle.id)
         .neq("status", "CANCELLED");
       const appraisalEmployeeIds = new Set((existingAppraisals ?? []).map((a) => String(a.employee_id)));
-      newEmployeeIds = rows
+      newEmployeeIds = deduplicatedRows
         .map((r) => r.employee_id)
         .filter((id) => !appraisalEmployeeIds.has(id));
     }
 
-    const employeesAdded = rows.filter((r) => !existingAllIds.has(r.employee_id)).length;
+    const employeesAdded = deduplicatedRows.filter((r) => !existingAllIds.has(r.employee_id)).length;
     const duration = Date.now() - startTime;
 
     if (logId) {
@@ -165,7 +260,7 @@ export async function POST(req: NextRequest) {
           .update({
             status: "completed",
             completed_at: new Date().toISOString(),
-            employees_synced: rows.length,
+            employees_synced: deduplicatedRows.length,
             employees_added: employeesAdded,
             employees_deactivated: toDeactivate.length,
             new_employee_ids: newEmployeeIds,
@@ -179,7 +274,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      employees_synced: rows.length,
+      employees_synced: deduplicatedRows.length,
       employees_added: employeesAdded,
       employees_deactivated: toDeactivate.length,
       new_without_appraisal: newEmployeeIds.length,

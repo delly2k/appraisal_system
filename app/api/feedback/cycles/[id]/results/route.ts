@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { getFeedbackCycleResultsForViewer } from "@/lib/feedback-cycle-results";
+import { loadGapAnalysisForParticipant } from "@/lib/feedback-gap-analysis";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -34,15 +35,18 @@ export async function GET(
     }
 
     const payload = await getFeedbackCycleResultsForViewer(supabase, cycleId, user.employee_id);
+    const gapAnalysis = await loadGapAnalysisForParticipant(supabase, cycleId, user.employee_id);
+
     if (!payload) {
       return NextResponse.json({
         cycle: null,
         results: [],
         weighted_overall: {},
+        gapAnalysis,
       });
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json({ ...payload, gapAnalysis });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Load failed";
     return NextResponse.json({ error: message }, { status: 500 });

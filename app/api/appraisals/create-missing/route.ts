@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   for (const empId of employeeIds) {
     const { data: emp } = await supabase
       .from("employees")
-      .select("employee_id, manager_employee_id, division_id")
+        .select("employee_id, division_id")
       .eq("employee_id", empId)
       .maybeSingle();
 
@@ -63,7 +63,9 @@ export async function POST(req: NextRequest) {
     const { error } = await supabase.from("appraisals").insert({
       employee_id: empId,
       cycle_id: activeCycle.id,
-      manager_employee_id: emp.manager_employee_id ?? null,
+      // manager_employee_id for appraisals is resolved from Dynamics/HRMIS elsewhere.
+      // employees table does not contain manager_employee_id.
+      manager_employee_id: null,
       division_id: emp.division_id ?? null,
       review_type: "annual",
       status: "DRAFT",

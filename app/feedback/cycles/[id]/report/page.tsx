@@ -3,6 +3,8 @@ import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { loadGapAnalysisForParticipant } from "@/lib/feedback-gap-analysis";
+import { GapAnalysisCard } from "@/components/feedback/gap-analysis-card";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -70,6 +72,9 @@ export default async function FeedbackReportPage({
     showDirectReportSection = Boolean(cycle.direct_report_feedback_visible_to_reviewee) && directReportSubmittedCount >= 2;
   }
 
+  const gapAnalysis =
+    employeeId ? await loadGapAnalysisForParticipant(supabase, id, employeeId) : [];
+
   return (
     <div className="w-full px-7 py-6 space-y-6">
       <div className="mb-5">
@@ -96,6 +101,11 @@ export default async function FeedbackReportPage({
           <p className="text-[13px] text-white/50">Closed {formatDate(cycle.end_date)}</p>
         </div>
       </div>
+      {employeeId && (
+        <div className="mb-6">
+          <GapAnalysisCard gaps={gapAnalysis} />
+        </div>
+      )}
       <div className="rounded-[14px] border border-[#dde5f5] bg-white shadow-[0_2px_12px_rgba(15,31,61,.07)] overflow-hidden">
         <div className="p-5 space-y-3">
           <p className="text-[13px] text-[#4a5a82]">

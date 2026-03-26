@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { EqResultsCard } from "@/components/development/eq-results-card";
 
 export interface DevProfileSkill {
   id: string;
@@ -135,12 +137,14 @@ export function DevelopmentProfileForm({
     } | null;
   };
 }) {
+  const router = useRouter();
   const { profile, cycles, employee, isManager, activeAppraisal, eqResult, eqDraft } = initialData;
   const isOwner = true;
   const daysSinceEQ = eqResult
     ? Math.floor((Date.now() - new Date(eqResult.taken_at).getTime()) / 86400000)
     : null;
   const retakeAvailable = daysSinceEQ === null || daysSinceEQ > 90;
+  const daysUntilRetake = retakeAvailable ? 0 : Math.max(0, 90 - (daysSinceEQ ?? 0));
   const draftAnsweredCount = eqDraft ? Object.keys(eqDraft.responses ?? {}).length : 0;
   const hasDraft = draftAnsweredCount > 0;
   const headerCTA = hasDraft && !eqResult
@@ -301,179 +305,121 @@ export function DevelopmentProfileForm({
         </div>
       )}
 
-      <div className="rounded-[14px] border border-[#dde5f5] shadow-[0_2px_12px_rgba(15,31,61,.07),0_0_1px_rgba(15,31,61,.1)] bg-white overflow-hidden mb-5">
-        <div className="px-5 py-4 bg-[#f8faff] border-b border-[#dde5f5] flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-[8px] bg-[#eff6ff] border border-[#bfdbfe] flex items-center justify-center text-[#3b82f6]">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="font-['Sora'] text-[16px] font-bold text-[#0f1f3d]">Emotional intelligence</h2>
-              <p className="text-[12px] text-[#8a97b8] mt-0.5">
-                {eqResult
-                  ? `Last assessed ${new Date(eqResult.taken_at).toLocaleDateString("en-JM", { day: "numeric", month: "short", year: "numeric" })}`
-                  : "No assessment on record"}
-                {eqResult && retakeAvailable && (
-                  <span className="ml-2 text-[10px] font-bold text-[#92400e] bg-[#fef3c7] px-2 py-0.5 rounded-full uppercase tracking-wide">
-                    Retake available
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          {headerCTA.style === "ghost" && eqResult ? (
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[22px] font-['Sora'] font-extrabold text-[#0f1f3d]">{eqResult.total_score}</span>
-                  <span className="text-[12px] text-[#8a97b8]">/250</span>
-                </div>
-                <p className="text-[10px] text-[#8a97b8] uppercase tracking-wide">Overall</p>
-              </div>
-              <Link
-                href={headerCTA.href}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-[8px] border border-[#dde5f5] bg-white text-[12px] font-['Sora'] font-semibold text-[#0f1f3d] hover:bg-[#f8faff] transition-colors"
-              >
-                {headerCTA.label}
-              </Link>
-            </div>
-          ) : hasDraft && !eqResult ? null : (
-            <Link
-              href={headerCTA.href}
-              className="flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#0d9488] text-white font-['Sora'] text-[12px] font-semibold hover:bg-[#0f766e] transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-              {headerCTA.label}
-            </Link>
-          )}
+      {eqResult ? (
+        <div className="mb-5 shadow-[0_2px_12px_rgba(15,31,61,.07),0_0_1px_rgba(15,31,61,.1)]">
+          <EqResultsCard
+            result={eqResult}
+            daysUntilRetake={daysUntilRetake}
+            onViewFull={() => router.push("/development/eq/take")}
+          />
         </div>
-
-        {hasDraft && !eqResult ? (
-          <>
-            <div className="px-6 py-5 flex items-center gap-4">
-              <div className="relative w-12 h-12 shrink-0">
-                <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44">
-                  <circle cx="22" cy="22" r="18" fill="none" stroke="#f0f4ff" strokeWidth="4" />
-                  <circle
-                    cx="22"
-                    cy="22"
-                    r="18"
-                    fill="none"
-                    stroke="#0d9488"
-                    strokeWidth="4"
-                    strokeDasharray={`${(draftAnsweredCount / 50) * 113} 113`}
-                    strokeLinecap="round"
-                  />
+      ) : (
+        <div className="rounded-[14px] border border-[#dde5f5] shadow-[0_2px_12px_rgba(15,31,61,.07),0_0_1px_rgba(15,31,61,.1)] bg-white overflow-hidden mb-5">
+          <div className="px-5 py-4 bg-[#f8faff] border-b border-[#dde5f5] flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-[8px] bg-[#eff6ff] border border-[#bfdbfe] flex items-center justify-center text-[#3b82f6]">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-[#0f1f3d]">
-                  {draftAnsweredCount}
-                </span>
               </div>
               <div>
-                <p className="text-[13.5px] font-semibold text-[#0f1f3d]">Assessment in progress</p>
+                <h2 className="font-['Sora'] text-[16px] font-bold text-[#0f1f3d]">Emotional intelligence</h2>
                 <p className="text-[12px] text-[#8a97b8] mt-0.5">
-                  {draftAnsweredCount}/50 questions answered · Page {(eqDraft?.last_page ?? 0) + 1} of 5
-                </p>
-                <p className="text-[11px] text-[#8a97b8] mt-0.5">
-                  Last saved{" "}
-                  {new Date(eqDraft?.updated_at ?? "").toLocaleDateString("en-JM", {
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  No assessment on record
                 </p>
               </div>
-              <div className="ml-auto">
-                <Link
-                  href="/development/eq/take"
-                  className="flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#0d9488] text-white font-['Sora'] text-[12px] font-semibold hover:bg-[#0f766e] transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                  Continue
-                </Link>
-              </div>
             </div>
-
-            <div className="px-6 pb-5">
-              <div className="h-[4px] bg-[#f0f4ff] rounded-full overflow-hidden">
-                <div className="h-full bg-[#0d9488] rounded-full transition-all" style={{ width: `${(draftAnsweredCount / 50) * 100}%` }} />
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-[10px] text-[#8a97b8]">{Math.round((draftAnsweredCount / 50) * 100)}% complete</span>
-                <span className="text-[10px] text-[#8a97b8]">{50 - draftAnsweredCount} remaining</span>
-              </div>
-            </div>
-          </>
-        ) : !eqResult ? (
-          <div className="px-6 py-6 flex items-center gap-4">
-            <div className="w-11 h-11 rounded-full bg-[#f0f4ff] flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-[#8a97b8]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[13.5px] font-semibold text-[#0f1f3d]">Discover your emotional intelligence profile</p>
-              <p className="text-[12px] text-[#8a97b8] mt-0.5">50 questions · 5 competencies · takes about 10 minutes</p>
-            </div>
+            {hasDraft && !eqResult ? null : (
+              <Link
+                href={headerCTA.href}
+                className="flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#0d9488] text-white font-['Sora'] text-[12px] font-semibold hover:bg-[#0f766e] transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+                {headerCTA.label}
+              </Link>
+            )}
           </div>
-        ) : (
-          <div className="px-6 py-5 space-y-3">
-            {([
-              { label: "Self awareness", score: eqResult.sa_total },
-              { label: "Managing emotions", score: eqResult.me_total },
-              { label: "Motivating oneself", score: eqResult.mo_total },
-              { label: "Empathy", score: eqResult.e_total },
-              { label: "Social skills", score: eqResult.ss_total },
-            ] as const).map(({ label, score }) => {
-              const isStrength = score >= 35;
-              const isPriority = score < 18;
-              const barColor = isStrength ? "#0d9488" : isPriority ? "#ef4444" : "#f59e0b";
-              const badge = isStrength
-                ? { bg: "#f0fdfa", border: "#99f6e4", text: "#0d9488", label: "Strength" }
-                : isPriority
-                  ? { bg: "#fef2f2", border: "#fca5a5", text: "#dc2626", label: "Priority" }
-                  : { bg: "#fffbeb", border: "#fcd34d", text: "#d97706", label: "Needs attention" };
-              return (
-                <div key={label} className="flex items-center gap-3">
-                  <span className="text-[12px] text-[#8a97b8] w-[140px] shrink-0">{label}</span>
-                  <div className="flex-1 h-[5px] bg-[#f0f4ff] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${(score / 50) * 100}%`, background: barColor }} />
-                  </div>
-                  <span className="text-[12px] font-bold text-[#0f1f3d] w-7 text-right shrink-0">{score}</span>
-                  <span
-                    className="text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 w-[110px] text-center uppercase tracking-wide"
-                    style={{ background: badge.bg, borderColor: badge.border, color: badge.text }}
-                  >
-                    {badge.label}
+
+          {hasDraft && !eqResult ? (
+            <>
+              <div className="px-6 py-5 flex items-center gap-4">
+                <div className="relative w-12 h-12 shrink-0">
+                  <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44">
+                    <circle cx="22" cy="22" r="18" fill="none" stroke="#f0f4ff" strokeWidth="4" />
+                    <circle
+                      cx="22"
+                      cy="22"
+                      r="18"
+                      fill="none"
+                      stroke="#0d9488"
+                      strokeWidth="4"
+                      strokeDasharray={`${(draftAnsweredCount / 50) * 113} 113`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-[#0f1f3d]">
+                    {draftAnsweredCount}
                   </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
+                <div>
+                  <p className="text-[13.5px] font-semibold text-[#0f1f3d]">Assessment in progress</p>
+                  <p className="text-[12px] text-[#8a97b8] mt-0.5">
+                    {draftAnsweredCount}/50 questions answered · Page {(eqDraft?.last_page ?? 0) + 1} of 5
+                  </p>
+                  <p className="text-[11px] text-[#8a97b8] mt-0.5">
+                    Last saved{" "}
+                    {new Date(eqDraft?.updated_at ?? "").toLocaleDateString("en-JM", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+                <div className="ml-auto">
+                  <Link
+                    href="/development/eq/take"
+                    className="flex items-center gap-2 px-5 py-2 rounded-[8px] bg-[#0d9488] text-white font-['Sora'] text-[12px] font-semibold hover:bg-[#0f766e] transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    Continue
+                  </Link>
+                </div>
+              </div>
 
-        {eqResult && (
-          <div className="px-6 py-3 bg-[#f8faff] border-t border-[#dde5f5] flex items-center justify-between">
-            <span className="text-[11px] text-[#8a97b8]">
-              {retakeAvailable ? "Retake now available" : `Retake available in ${90 - (daysSinceEQ ?? 0)} days`}
-            </span>
-            <Link href="/development/eq/take" className="text-[11px] font-semibold text-[#0d9488] hover:underline">
-              {retakeAvailable ? "Retake assessment →" : "View full results →"}
-            </Link>
-          </div>
-        )}
-      </div>
+              <div className="px-6 pb-5">
+                <div className="h-[4px] bg-[#f0f4ff] rounded-full overflow-hidden">
+                  <div className="h-full bg-[#0d9488] rounded-full transition-all" style={{ width: `${(draftAnsweredCount / 50) * 100}%` }} />
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-[10px] text-[#8a97b8]">{Math.round((draftAnsweredCount / 50) * 100)}% complete</span>
+                  <span className="text-[10px] text-[#8a97b8]">{50 - draftAnsweredCount} remaining</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="px-6 py-6 flex items-center gap-4">
+              <div className="w-11 h-11 rounded-full bg-[#f0f4ff] flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-[#8a97b8]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[13.5px] font-semibold text-[#0f1f3d]">Discover your emotional intelligence profile</p>
+                <p className="text-[12px] text-[#8a97b8] mt-0.5">50 questions · 5 competencies · takes about 10 minutes</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="rounded-[14px] border border-[#dde5f5] shadow-[0_2px_12px_rgba(15,31,61,.07),0_0_1px_rgba(15,31,61,.1)] bg-white overflow-hidden mb-5">
         <div className="px-6 py-4 border-b border-[#dde5f5] flex items-center gap-3"

@@ -124,7 +124,6 @@ type TaskRow = {
   href: string;
   participantName: string;
   participantEmployeeId: string;
-  department: string;
   reviewType: string;
   dueDate: string | null;
   reviewerStatus: string;
@@ -330,7 +329,7 @@ export default async function FeedbackPage() {
 
       const [{ data: cycleRows }, { data: employees }, { data: respRows }] = await Promise.all([
         supabase.from("feedback_cycle").select("id, cycle_name, end_date").in("id", cycleIds),
-        supabase.from("employees").select("employee_id, full_name, department_name").in("employee_id", participantIds),
+        supabase.from("employees").select("employee_id, full_name").in("employee_id", participantIds),
         supabase.from("feedback_response").select("reviewer_id").in("reviewer_id", reviewerRowIds),
       ]);
 
@@ -351,7 +350,6 @@ export default async function FeedbackPage() {
           href: `/feedback/cycles/${r.cycle_id}/review/${r.id}`,
           participantName: emp?.full_name ?? r.participant_employee_id,
           participantEmployeeId: r.participant_employee_id,
-          department: emp?.department_name ?? "—",
           reviewType: (r.reviewer_type as string) ?? "—",
           dueDate: cycle?.end_date ?? null,
           reviewerStatus: String(r.status ?? "Pending"),
@@ -455,7 +453,6 @@ export default async function FeedbackPage() {
     cycleId: string;
     employeeId: string;
     name: string;
-    department: string | null;
     /** 1–5 aggregate from result buckets; null if no submitted scores yet */
     aggregateAvg1to5: number | null;
     submitted: number;
@@ -502,7 +499,7 @@ export default async function FeedbackPage() {
 
       const { data: emps } = await supabase
         .from("employees")
-        .select("employee_id, full_name, department_name")
+        .select("employee_id, full_name")
         .in("employee_id", teamMemberIds);
 
       const empMap = new Map((emps ?? []).map((e) => [e.employee_id, e]));
@@ -528,7 +525,6 @@ export default async function FeedbackPage() {
           cycleId: c.id,
           employeeId: pid,
           name: emp?.full_name ?? pid,
-          department: emp?.department_name ?? null,
           aggregateAvg1to5,
           submitted,
           total,
@@ -703,10 +699,7 @@ export default async function FeedbackPage() {
                             >
                               {getInitials(row.participantName)}
                             </div>
-                            <div>
-                              <p className="text-[12px] font-semibold text-[#0f2044]">{row.participantName}</p>
-                              <p className="text-[10px] text-[#94a3b8]">{row.department}</p>
-                            </div>
+                            <p className="text-[12px] font-semibold text-[#0f2044]">{row.participantName}</p>
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -804,12 +797,7 @@ export default async function FeedbackPage() {
                                   >
                                     {getInitials(tr.name)}
                                   </div>
-                                  <div>
-                                    <p className="text-[12px] font-semibold text-[#0f2044]">{tr.name}</p>
-                                    {tr.department && (
-                                      <p className="text-[10px] text-[#94a3b8]">{tr.department}</p>
-                                    )}
-                                  </div>
+                                  <p className="text-[12px] font-semibold text-[#0f2044]">{tr.name}</p>
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-xs font-medium text-[#0f2044]">{scoreLabel}</td>
