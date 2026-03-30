@@ -68,6 +68,7 @@ export function FeedbackReviewForm({
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<null | "submitted" | "updated">(null);
   const [state, setState] = useState<Record<string, { score: number | null; comment: string }>>(() => {
     const out: Record<string, { score: number | null; comment: string }> = {};
     for (const q of questions) {
@@ -102,6 +103,8 @@ export function FeedbackReviewForm({
 
   const submit = async () => {
     setError(null);
+    setSubmitSuccess(null);
+    const amendingSubmitted = isSubmitted;
     setSaving(true);
     try {
       const res = await fetch(`/api/feedback/cycles/${cycleId}/review/${reviewerId}`, {
@@ -114,6 +117,7 @@ export function FeedbackReviewForm({
         setError(data.error ?? "Submit failed");
         return;
       }
+      setSubmitSuccess(amendingSubmitted ? "updated" : "submitted");
       router.refresh();
     } finally {
       setSaving(false);
@@ -135,6 +139,7 @@ export function FeedbackReviewForm({
   const totalCount = questions.length;
   const isComplete = totalCount > 0 && answeredCount === totalCount;
   const statusClass = isSubmitted ? "text-[#065f46]" : "text-[#92400e]";
+  const allowEdit = !isSubmitted || cycleStatus === "Active";
 
   return (
     <div className="space-y-6">
@@ -153,11 +158,16 @@ export function FeedbackReviewForm({
                 {cycleName} · {isSubmitted ? <span className={statusClass}>Submitted</span> : <span className={statusClass}>Pending</span>}
               </>
             ) : (
-              `${cycleName}${reviewee?.job_title ? ` · ${reviewee.job_title}` : ""}`
+              <>
+                {cycleName}
+                {reviewee?.job_title ? ` · ${reviewee.job_title}` : ""}
+                {" · "}
+                {isSubmitted ? <span className={statusClass}>Submitted</span> : <span className={statusClass}>Pending</span>}
+              </>
             )}
           </p>
         </div>
-        {!isSubmitted && totalCount > 0 && (
+        {allowEdit && totalCount > 0 && (
           <div className="flex flex-col items-end gap-1">
             <span className="text-[11px] font-semibold text-[#4a5a82]">
               {answeredCount} of {totalCount} answered
@@ -202,6 +212,14 @@ export function FeedbackReviewForm({
         </div>
       )}
 
+      {submitSuccess && (
+        <div className="rounded-[8px] border border-[#a7f3d0] bg-[#ecfdf5] px-4 py-2 text-[13px] text-[#047857]">
+          {submitSuccess === "updated"
+            ? "Your updates were saved successfully."
+            : "Your assessment was submitted successfully."}
+        </div>
+      )}
+
       {groups.map(([groupName, qs]) => (
         <div key={groupName} className="space-y-4">
           <div className="flex items-center gap-2.5 mb-4">
@@ -225,7 +243,7 @@ export function FeedbackReviewForm({
                     <div className="px-5 py-4 grid grid-cols-[240px_1fr] gap-4">
                       <div className="flex flex-col gap-2">
                         <p className="text-[10px] font-bold uppercase tracking-[.07em] text-[#8a97b8]">Rating</p>
-                        {isSubmitted ? (
+                        {!allowEdit ? (
                           <p className="text-[13px] text-[#4a5a82]">
                             {score != null && scale.find((s) => s.value === score)
                               ? `${score} – ${scale.find((s) => s.value === score)!.label}`
@@ -261,7 +279,7 @@ export function FeedbackReviewForm({
                         <p className="text-[10px] font-bold uppercase tracking-[.07em] text-[#8a97b8]">
                           Comment <span className="font-normal normal-case">(optional)</span>
                         </p>
-                        {isSubmitted ? (
+                        {!allowEdit ? (
                           <p className="text-[13px] text-[#4a5a82]">{comment || "—"}</p>
                         ) : (
                           <textarea
@@ -282,7 +300,7 @@ export function FeedbackReviewForm({
         </div>
       ))}
 
-      {!isSubmitted && (
+      {allowEdit && (
         <div className="sticky bottom-0 left-0 right-0 z-10 bg-white border-t border-[#dde5f5] shadow-[0_-4px_16px_rgba(15,31,61,0.06)] flex items-center justify-between px-6 py-3.5">
           <span className="text-[11px] text-[#8a97b8]">
             {answeredCount} of {totalCount} questions answered

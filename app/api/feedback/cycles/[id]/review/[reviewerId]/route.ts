@@ -113,7 +113,16 @@ export async function POST(
     if (reviewer.reviewer_employee_id !== user.employee_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (reviewer.status === "Submitted") {
+
+    const { data: cycleRow } = await supabase
+      .from("feedback_cycle")
+      .select("status")
+      .eq("id", cycleId)
+      .maybeSingle();
+    const cycleActive = cycleRow?.status === "Active";
+
+    const alreadySubmitted = reviewer.status === "Submitted";
+    if (alreadySubmitted && !cycleActive) {
       return NextResponse.json({ error: "Review already submitted" }, { status: 400 });
     }
 
@@ -124,10 +133,28 @@ export async function POST(
       return NextResponse.json({ error: "responses object required" }, { status: 400 });
     }
 
+    const submittedAtByQuestion = new Map<string, string>();
+    if (alreadySubmitted) {
+      const { data: existingResp } = await supabase
+        .from("feedback_response")
+        .select("question_id, submitted_at")
+        .eq("reviewer_id", reviewerId);
+      for (const row of existingResp ?? []) {
+        const qid = row.question_id as string;
+        const at = row.submitted_at as string | null;
+        if (at) submittedAtByQuestion.set(qid, at);
+      }
+    }
+
     for (const [questionId, data] of Object.entries(responses)) {
       const score = data?.score != null ? Number(data.score) : null;
       const comment = typeof data?.comment === "string" ? data.comment : "";
       if (score !== null && (score < 1 || score > 5)) continue;
+      const submitted_at = alreadySubmitted
+        ? (submittedAtByQuestion.get(questionId) ?? new Date().toISOString())
+        : shouldSubmit
+          ? new Date().toISOString()
+          : null;
       const { error: upsertErr } = await supabase
         .from("feedback_response")
         .upsert(
@@ -136,7 +163,7 @@ export async function POST(
             question_id: questionId,
             score: score ?? null,
             comment: comment || null,
-            submitted_at: shouldSubmit ? new Date().toISOString() : null,
+            submitted_at,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "reviewer_id,question_id" }
@@ -146,7 +173,7 @@ export async function POST(
       }
     }
 
-    if (shouldSubmit) {
+    if (shouldSubmit && !alreadySubmitted) {
       const { error: updateErr } = await supabase
         .from("feedback_reviewer")
         .update({ status: "Submitted" })
@@ -165,7 +192,9 @@ export async function POST(
       } catch {
         // non-fatal
       }
+    }
 
+    if (shouldSubmit || alreadySubmitted) {
       try {
         const score = await computeAggregatedScore(
           supabase,
