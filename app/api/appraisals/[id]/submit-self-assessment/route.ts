@@ -5,6 +5,7 @@ import { transitionStatus } from "@/lib/appraisal-workflow";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
 import { isAppraisalStatus } from "@/types/appraisal";
 import { fetchCompletionReport } from "@/lib/appraisal-completion";
+import { notifyManager } from "@/lib/notifications";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,7 +27,7 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, employee_id, manager_employee_id")
+      .select("id, status, employee_id, manager_employee_id, cycle_id")
       .eq("id", appraisalId)
       .single();
 
@@ -92,40 +93,42 @@ export async function POST(
     }
 
     // Snapshot development profile at submission time for manager/HOD/HR to see as-of submission
-    const { data: profileOwner } = await supabase
-      .from("app_users")
-      .select("id")
+    const { data: devProfile } = await supabase
+      .from("employee_development_profiles")
+      .select("*")
       .eq("employee_id", appraisal.employee_id)
       .maybeSingle();
-    if (profileOwner?.id) {
-      const { data: devProfile } = await supabase
-        .from("employee_development_profiles")
-        .select("*")
-        .eq("employee_id", profileOwner.id)
-        .maybeSingle();
-      if (devProfile) {
-        await supabase
-          .from("development_profile_snapshots")
-          .upsert(
-            {
-              appraisal_id: appraisalId,
-              employee_id: profileOwner.id,
-              snapshot_data: devProfile as Record<string, unknown>,
-              snapshotted_at: new Date().toISOString(),
-            },
-            { onConflict: "appraisal_id" }
-          );
-      }
+    if (devProfile) {
+      await supabase.from("development_profile_snapshots").upsert(
+        {
+          appraisal_id: appraisalId,
+          employee_id: appraisal.employee_id,
+          snapshot_data: devProfile as Record<string, unknown>,
+          snapshotted_at: new Date().toISOString(),
+        },
+        { onConflict: "appraisal_id" }
+      );
     }
+
+    const { data: empRow } = await supabase
+      .from("employees")
+      .select("full_name")
+      .eq("employee_id", appraisal.employee_id)
+      .maybeSingle();
+    const { data: cycleRow } = await supabase
+      .from("appraisal_cycles")
+      .select("name, end_date")
+      .eq("id", appraisal.cycle_id)
+      .maybeSingle();
+    const { data: mgrEmp } = await supabase
+      .from("employees")
+      .select("email, full_name")
+      .eq("employee_id", appraisal.manager_employee_id)
+      .maybeSingle();
+    const employeeName = empRow?.full_name ?? "An employee";
 
     try {
       const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
-      const { data: empRow } = await supabase
-        .from("employees")
-        .select("full_name")
-        .eq("employee_id", appraisal.employee_id)
-        .maybeSingle();
-      const employeeName = empRow?.full_name ?? "An employee";
       await createNotificationForEmployeeId(appraisal.manager_employee_id, {
         type: "appraisal.submitted",
         title: "Appraisal submitted",
@@ -133,6 +136,24 @@ export async function POST(
         link: `/appraisals/${appraisalId}`,
         metadata: { appraisal_id: appraisalId },
       });
+    } catch {
+      /* non-blocking */
+    }
+
+    try {
+      if (mgrEmp?.email?.trim()) {
+        await notifyManager(
+          { email: mgrEmp.email.trim(), name: mgrEmp.full_name ?? undefined },
+          "manager_review_due",
+          {
+            cycleName: (cycleRow?.name as string) ?? "Appraisal",
+            employeeName,
+            managerName: mgrEmp.full_name ?? null,
+            dueDate: (cycleRow?.end_date as string | null) ?? null,
+            appraisalId,
+          }
+        );
+      }
     } catch {
       /* non-blocking */
     }

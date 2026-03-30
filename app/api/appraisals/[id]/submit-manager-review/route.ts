@@ -5,6 +5,7 @@ import { isAppraisalStatus } from "@/types/appraisal";
 import { resolveManagerSystemUserId } from "@/lib/hrmis-approval-auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
 import { fetchCompletionReport } from "@/lib/appraisal-completion";
+import { notifyEmployee } from "@/lib/notifications";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,7 +27,7 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, employee_id, manager_employee_id")
+      .select("id, status, employee_id, manager_employee_id, cycle_id")
       .eq("id", appraisalId)
       .single();
 
@@ -65,6 +66,32 @@ export async function POST(
         link: `/appraisals/${appraisalId}`,
         metadata: { appraisal_id: appraisalId },
       });
+    } catch {
+      /* non-blocking */
+    }
+
+    try {
+      const { data: cycle } = await supabase
+        .from("appraisal_cycles")
+        .select("name")
+        .eq("id", appraisal.cycle_id)
+        .maybeSingle();
+      const { data: emp } = await supabase
+        .from("employees")
+        .select("email, full_name")
+        .eq("employee_id", appraisal.employee_id)
+        .maybeSingle();
+      if (emp?.email?.trim()) {
+        await notifyEmployee(
+          { email: emp.email.trim(), name: emp.full_name ?? undefined },
+          "manager_review_complete",
+          {
+            cycleName: (cycle?.name as string) ?? "Appraisal",
+            employeeName: emp.full_name ?? emp.email,
+            appraisalId,
+          }
+        );
+      }
     } catch {
       /* non-blocking */
     }

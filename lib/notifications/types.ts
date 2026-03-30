@@ -1,5 +1,6 @@
 export type NotificationType =
   | "appraisal.submitted"
+  | "appraisal.workplan_pending"
   | "appraisal.manager_reviewed"
   | "appraisal.sign_off_ready"
   | "appraisal.signed"

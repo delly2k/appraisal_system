@@ -8,11 +8,7 @@ export const EVIDENCE_WEIGHTS: Record<string, number> = {
   document_shared: 40,
   meeting_attended: 10,
   email_sent: 10,
-  // Phase 3 email types (add when email collector implemented):
-  // email_with_attachment: 40,
-  // email_thread_large: 30,
-  // decision_email_subject: 50,
-  // email_sent_simple: 10,
+  email_sent_external: 35,
 };
 
 export const CLUSTER_THRESHOLDS = {

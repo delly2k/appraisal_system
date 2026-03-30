@@ -10,6 +10,8 @@ export type NotificationEvent =
   | "self_assessment_due"
   | "self_assessment_open"
   | "manager_review_due"
+  | "workplan_pending_approval"
+  | "manager_review_complete"
   | "hr_decision_required";
 
 export interface SelfAssessmentOpenPayload {
@@ -46,6 +48,28 @@ export interface ManagerReviewDuePayload {
   managerName?: string | null;
   dueDate?: string | null;
   appraisalId: string;
+}
+
+/** Email when work plan is in PENDING_APPROVAL (notify the other party). */
+export interface WorkplanPendingApprovalPayload {
+  cycleName: string;
+  employeeName: string;
+  managerName?: string | null;
+  appraisalId: string;
+  dueDate?: string | null;
+}
+
+/** Email to employee when manager has finished their review form. */
+export interface ManagerReviewCompletePayload {
+  cycleName: string;
+  employeeName: string;
+  appraisalId: string;
+}
+
+function appraisalAbsoluteUrl(appraisalId: string): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const path = `/appraisals/${appraisalId}`;
+  return base ? `${base}${path}` : path;
 }
 
 export interface HRDecisionRequiredPayload {
@@ -101,6 +125,8 @@ export async function notifyEmployee(
     | SelfAssessmentDuePayload
     | SelfAssessmentOpenPayload
     | ManagerReviewDuePayload
+    | WorkplanPendingApprovalPayload
+    | ManagerReviewCompletePayload
     | HRDecisionRequiredPayload
 ): Promise<void> {
   const email = recipientEmail(recipient);
@@ -140,6 +166,33 @@ export async function notifyEmployee(
         .join("\n\n");
       break;
     }
+    case "workplan_pending_approval": {
+      const p = payload as WorkplanPendingApprovalPayload;
+      subject = `Work plan pending your approval — ${p.cycleName}`;
+      bodyText = [
+        `Hello ${recipientName(recipient)},`,
+        `The work plan for "${p.cycleName}" has been submitted for approval.`,
+        p.managerName
+          ? `${p.managerName} has completed their side; please log in to review and add your approval when ready.`
+          : "Please log in to the appraisal system to review and add your approval when ready.",
+        p.dueDate ? `Cycle end date: ${p.dueDate}.` : "",
+        `Open appraisal: ${appraisalAbsoluteUrl(p.appraisalId)}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      break;
+    }
+    case "manager_review_complete": {
+      const p = payload as ManagerReviewCompletePayload;
+      subject = `Manager review submitted — ${p.cycleName}`;
+      bodyText = [
+        `Hello ${p.employeeName},`,
+        `Your manager has submitted their review for "${p.cycleName}".`,
+        "Log in to the appraisal system to view next steps (e.g. sign-off).",
+        `Open appraisal: ${appraisalAbsoluteUrl(p.appraisalId)}`,
+      ].join("\n\n");
+      break;
+    }
     default:
       return;
   }
@@ -158,6 +211,7 @@ export async function notifyManager(
     | CycleOpenedPayload
     | SelfAssessmentDuePayload
     | ManagerReviewDuePayload
+    | WorkplanPendingApprovalPayload
     | HRDecisionRequiredPayload
 ): Promise<void> {
   const email = recipientEmail(recipient);
@@ -173,7 +227,22 @@ export async function notifyManager(
         `A manager review is pending for ${p.employeeName} in the cycle "${p.cycleName}".`,
         p.dueDate ? `Due by ${p.dueDate}.` : "Please complete the review when possible.",
         "Log in to the appraisal system to complete the review.",
+        `Open appraisal: ${appraisalAbsoluteUrl(p.appraisalId)}`,
       ].join("\n\n");
+      break;
+    }
+    case "workplan_pending_approval": {
+      const p = payload as WorkplanPendingApprovalPayload;
+      subject = `Work plan pending your approval: ${p.employeeName} – ${p.cycleName}`;
+      bodyText = [
+        p.managerName ? `Hello ${p.managerName},` : "Hello,",
+        `${p.employeeName}'s work plan for "${p.cycleName}" has been submitted for approval.`,
+        "Please log in to review and add your approval when ready.",
+        p.dueDate ? `Cycle end date: ${p.dueDate}.` : "",
+        `Open appraisal: ${appraisalAbsoluteUrl(p.appraisalId)}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       break;
     }
     case "cycle_opened": {

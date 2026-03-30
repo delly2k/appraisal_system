@@ -5,27 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { canAccessEvidenceForEmployee } from "@/lib/evidence-auth";
 import { getGraphToken } from "@/lib/azure-graph-token";
 import { collectAppraisalEvidence } from "@/lib/evidence-collectors";
-
-const KEYWORD_STOPWORDS = new Set([
-  "the", "and", "for", "with", "from", "this", "that", "have", "been", "will", "into", "over",
-  "our", "their", "your", "its", "was", "are", "has", "but", "not", "they", "all", "one", "can",
-  "it", "is", "in", "of", "to", "a", "an", "at", "be", "by", "or", "as", "on", "up", "do", "if",
-  "so", "no", "we", "he", "she", "his", "her",
-]);
-
-function extractKeywords(text: string): string[] {
-  return (text ?? "")
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length > 1 && !KEYWORD_STOPWORDS.has(t));
-}
-
-function keywordMatch(itemWords: string[], evWords: string[]): boolean {
-  if (itemWords.length === 0 || evWords.length === 0) return false;
-  const itemSet = new Set(itemWords);
-  return evWords.some((w) => [...itemSet].some((k) => k.includes(w) || w.includes(k)));
-}
+import { extractKeywords, keywordMatch } from "@/lib/evidence-keywords";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -41,6 +21,7 @@ interface EvidenceRow {
   activity_date: string;
   confidence_weight?: number;
   related_goal_id?: string | null;
+  description?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -124,9 +105,49 @@ export async function POST(req: NextRequest) {
       console.warn("[generate-suggestions] sharepoint collector unavailable:", e);
     }
 
+    const { data: workplanEarly } = await supabase
+      .from("workplans")
+      .select("id")
+      .eq("appraisal_id", appraisalId)
+      .maybeSingle();
+
+    const { data: workplanItemsEarly } = workplanEarly
+      ? await supabase
+          .from("workplan_items")
+          .select("id, corporate_objective, division_objective, individual_objective, major_task, key_output, performance_standard")
+          .eq("workplan_id", workplanEarly.id)
+      : { data: null as null };
+
+    const workplanItemsForEmail = workplanItemsEarly ?? [];
+
+    let emailCollected = 0;
+    let emailDiag: unknown = undefined;
+    try {
+      const emailRes = await fetch(`${base}/api/evidence/collect/email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: req.headers.get("cookie") ?? "",
+        },
+        body: JSON.stringify({
+          employeeId,
+          reviewStart,
+          reviewEnd,
+          graphToken,
+          workplanItems: workplanItemsForEmail,
+          appraisalManagerId: appraisal.manager_employee_id ?? undefined,
+        }),
+      });
+      const emailData = await emailRes.json();
+      emailCollected = emailData.collected ?? 0;
+      emailDiag = emailData?.diagnosis;
+    } catch (e) {
+      console.warn("[generate-suggestions] email collector unavailable:", e);
+    }
+
     const scanReport = {
       generatedAt: new Date().toISOString(),
-      totalCollected: appraisalCollected + calendarCollected + sharepointCollected,
+      totalCollected: appraisalCollected + calendarCollected + sharepointCollected + emailCollected,
       sources: [
         {
           name: "Appraisal / Workplan",
@@ -154,11 +175,13 @@ export async function POST(req: NextRequest) {
             : "Requires Azure Graph OAuth — not yet connected",
         },
         {
-          name: "Email",
-          attempted: false,
-          collected: 0,
-          status: "stub",
-          note: "Planned for Phase 3 — not yet implemented",
+          name: "Email (Sent Items)",
+          attempted: true,
+          collected: emailCollected,
+          status: graphStatus,
+          note: graphToken
+            ? "Sent mail matched to workplan objectives via Microsoft Graph"
+            : graphNote,
         },
       ],
     };
@@ -167,14 +190,13 @@ export async function POST(req: NextRequest) {
       appraisal: appraisalResult.diagnosis,
       calendar: calendarDiag,
       sharePoint: sharePointDiag,
+      email: emailDiag,
       clustering: undefined as unknown,
     };
 
-    const { data: workplan } = await supabase
-      .from("workplans")
-      .select("id")
-      .eq("appraisal_id", appraisalId)
-      .single();
+    const { data: workplan } = workplanEarly
+      ? { data: workplanEarly }
+      : await supabase.from("workplans").select("id").eq("appraisal_id", appraisalId).single();
 
     if (!workplan) {
       return NextResponse.json({
@@ -273,7 +295,15 @@ The employee's objective was:
 - Actual result: ${actualLabel}
 
 Supporting evidence (documents, meetings, and activity related to this objective):
-${evidenceForItem.map((e) => `- ${e.activity_type}: ${e.title} (${e.activity_date})`).join("\n")}
+${evidenceForItem
+        .map((e) => {
+          const extra =
+            e.description && String(e.description).trim()
+              ? ` — ${String(e.description).trim().slice(0, 120)}`
+              : "";
+          return `- ${e.activity_type}: ${e.title} (${e.activity_date})${extra}`;
+        })
+        .join("\n")}
 
 Write one concise achievement statement that describes what was accomplished for THIS objective specifically.
 Use ONLY the evidence provided. Do not invent activities.

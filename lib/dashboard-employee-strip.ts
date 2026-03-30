@@ -172,7 +172,7 @@ export async function fetchEmployeeDashboardStrip(
   const { data: profile } = await supabase
     .from("employee_development_profiles")
     .select("skills, career_role, career_timeframe, employee_ld_comments")
-    .eq("employee_id", user.id)
+    .eq("employee_id", employeeId)
     .maybeSingle();
   if (profile) {
     const skills = Array.isArray(profile.skills) ? profile.skills.length : 0;

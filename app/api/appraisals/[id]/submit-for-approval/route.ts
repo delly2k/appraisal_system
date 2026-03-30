@@ -5,6 +5,7 @@ import { transitionStatus } from "@/lib/appraisal-workflow";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
 import { isAppraisalStatus } from "@/types/appraisal";
 import { fetchCompletionReport } from "@/lib/appraisal-completion";
+import { notifyEmployee, notifyManager } from "@/lib/notifications";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,7 +27,7 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, employee_id, manager_employee_id, is_management")
+      .select("id, status, employee_id, manager_employee_id, is_management, cycle_id")
       .eq("id", appraisalId)
       .single();
 
@@ -94,6 +95,71 @@ export async function POST(
 
     if (transErr) {
       return NextResponse.json({ error: transErr }, { status: 400 });
+    }
+
+    try {
+      const { data: cycle } = await supabase
+        .from("appraisal_cycles")
+        .select("name, end_date")
+        .eq("id", appraisal.cycle_id)
+        .maybeSingle();
+      const { data: emp } = await supabase
+        .from("employees")
+        .select("email, full_name")
+        .eq("employee_id", appraisal.employee_id)
+        .maybeSingle();
+      const { data: mgr } = await supabase
+        .from("employees")
+        .select("email, full_name")
+        .eq("employee_id", appraisal.manager_employee_id)
+        .maybeSingle();
+      const cycleName = (cycle?.name as string) ?? "Appraisal";
+      const dueDate = (cycle?.end_date as string | null) ?? null;
+      const employeeName = emp?.full_name ?? "Employee";
+      const managerName = mgr?.full_name ?? null;
+      const payload = {
+        cycleName,
+        employeeName,
+        managerName,
+        appraisalId,
+        dueDate,
+      };
+      if (isEmployee && mgr?.email?.trim()) {
+        await notifyManager(
+          { email: mgr.email.trim(), name: mgr.full_name ?? undefined },
+          "workplan_pending_approval",
+          payload
+        );
+      } else if (isManager && emp?.email?.trim()) {
+        await notifyEmployee(
+          { email: emp.email.trim(), name: emp.full_name ?? undefined },
+          "workplan_pending_approval",
+          payload
+        );
+      }
+
+      const { createNotificationForEmployeeId } = await import("@/lib/notifications/create");
+      if (isEmployee) {
+        await createNotificationForEmployeeId(appraisal.manager_employee_id, {
+          type: "appraisal.workplan_pending",
+          title: "Work plan pending your approval",
+          body: `${employeeName}'s work plan for "${cycleName}" was submitted. Please review and approve.`,
+          link: `/appraisals/${appraisalId}`,
+          metadata: { appraisal_id: appraisalId, cycle_id: appraisal.cycle_id },
+        });
+      } else if (isManager) {
+        await createNotificationForEmployeeId(appraisal.employee_id, {
+          type: "appraisal.workplan_pending",
+          title: "Work plan pending your approval",
+          body: managerName
+            ? `${managerName} submitted the work plan for "${cycleName}". Please review and approve.`
+            : `Your manager submitted the work plan for "${cycleName}". Please review and approve.`,
+          link: `/appraisals/${appraisalId}`,
+          metadata: { appraisal_id: appraisalId, cycle_id: appraisal.cycle_id },
+        });
+      }
+    } catch {
+      /* non-blocking */
     }
 
     return NextResponse.json({ success: true, status: "PENDING_APPROVAL" });
