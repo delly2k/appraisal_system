@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { createClient } from "@/lib/supabase";
-import { Search, ChevronRight, Building2, Layers, Briefcase } from "lucide-react";
+import { Search, ChevronRight, Building2, Layers, Briefcase, Copy } from "lucide-react";
 
 export interface PickerObjective {
   id: string;
@@ -695,23 +695,32 @@ export function WorkplanSection({
     });
   }, [objectives, picker.field, picker.rowId, pickerSearch, items]);
 
-  const usedIds = useMemo(() => {
-    const set = new Set<string>();
-    items
-      .filter((r) => r.id !== picker.rowId)
-      .forEach((r) => {
-        if (r.corporate?.id) set.add(r.corporate.id);
-        if (r.divisional?.id) set.add(r.divisional.id);
-      });
-    return set;
-  }, [items, picker.rowId]);
-
   const deleteRow = useCallback((id: string) => {
     if (!canEditPlanningFields) return;
     setItems((prev) => prev.filter((r) => r.id !== id));
     if (!id.startsWith("new-")) {
       setIdsToDelete((prev) => [...prev, id]);
     }
+    setIsDirty(true);
+    onDirtyChange?.(true);
+  }, [canEditPlanningFields, onDirtyChange]);
+
+  const duplicateRow = useCallback((id: string) => {
+    if (!canEditPlanningFields) return;
+    setItems((prev) => {
+      const index = prev.findIndex((r) => r.id === id);
+      if (index === -1) return prev;
+      const original = prev[index];
+      const copy: WorkplanItemRow = {
+        ...original,
+        id: nextNewId(),
+        weight: 0,
+        points: null,
+      };
+      const updated = [...prev];
+      updated.splice(index + 1, 0, copy);
+      return updated;
+    });
     setIsDirty(true);
     onDirtyChange?.(true);
   }, [canEditPlanningFields, onDirtyChange]);
@@ -1082,16 +1091,32 @@ export function WorkplanSection({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "7px",
-                  padding: "9px 18px",
+                  padding: "10px 20px",
                   borderRadius: "8px",
-                  background: "white",
-                  border: "1px solid #dde5f5",
+                  background: "#0B1F45",
+                  border: "none",
                   fontSize: "13px",
                   fontWeight: 500,
-                  color: "#4a5a82",
+                  color: "white",
                   cursor: workplan?.id ? "pointer" : "not-allowed",
                   opacity: workplan?.id ? 1 : 0.5,
-                  transition: "all 0.15s",
+                  transition: "background-color 0.15s ease, transform 0.1s ease",
+                }}
+                onMouseEnter={(e) => {
+                  if (!workplan?.id) return;
+                  e.currentTarget.style.background = "#162d5e";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#0B1F45";
+                  e.currentTarget.style.transform = "scale(1)";
+                }}
+                onMouseDown={(e) => {
+                  if (!workplan?.id) return;
+                  e.currentTarget.style.transform = "scale(0.98)";
+                }}
+                onMouseUp={(e) => {
+                  if (!workplan?.id) return;
+                  e.currentTarget.style.transform = "scale(1)";
                 }}
               >
                 <PlusIcon /> Add Objective
@@ -1712,27 +1737,59 @@ export function WorkplanSection({
                     
                     {canEditPlanningFields && (
                       <td style={tdStyle}>
-                        <button
-                          onClick={() => deleteRow(row.id)}
-                          style={{
-                            width: "30px",
-                            height: "30px",
-                            padding: 0,
-                            borderRadius: "8px",
-                            background: "#fff1f2",
-                            border: "1px solid #fecdd3",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#e11d48",
-                            cursor: "pointer",
-                            transition: "all 0.15s",
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = "#e11d48"; e.currentTarget.style.color = "white"; e.currentTarget.style.borderColor = "#e11d48"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = "#fff1f2"; e.currentTarget.style.color = "#e11d48"; e.currentTarget.style.borderColor = "#fecdd3"; }}
-                        >
-                          <TrashIcon />
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() => duplicateRow(row.id)}
+                                style={{
+                                  width: "30px",
+                                  height: "30px",
+                                  padding: 0,
+                                  borderRadius: "8px",
+                                  background: "#f0fdfa",
+                                  border: "1px solid #99f6e4",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "#0F8A6E",
+                                  cursor: "pointer",
+                                  transition: "all 0.15s",
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = "#0F8A6E"; e.currentTarget.style.color = "white"; e.currentTarget.style.borderColor = "#0F8A6E"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = "#f0fdfa"; e.currentTarget.style.color = "#0F8A6E"; e.currentTarget.style.borderColor = "#99f6e4"; }}
+                                aria-label="Duplicate objective"
+                              >
+                                <Copy size={14} />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" sideOffset={8} className="border-0 bg-[#0f1f3d] px-3 py-2.5 text-white shadow-lg">
+                              Duplicate objective
+                            </TooltipContent>
+                          </Tooltip>
+                          <button
+                            onClick={() => deleteRow(row.id)}
+                            style={{
+                              width: "30px",
+                              height: "30px",
+                              padding: 0,
+                              borderRadius: "8px",
+                              background: "#fff1f2",
+                              border: "1px solid #fecdd3",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "#e11d48",
+                              cursor: "pointer",
+                              transition: "all 0.15s",
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = "#e11d48"; e.currentTarget.style.color = "white"; e.currentTarget.style.borderColor = "#e11d48"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff1f2"; e.currentTarget.style.color = "#e11d48"; e.currentTarget.style.borderColor = "#fecdd3"; }}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -1760,6 +1817,57 @@ export function WorkplanSection({
                 </tr>
               </tfoot>
             </table>
+            {canEditPlanningFields && items.length > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-start",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  borderTop: "1px solid #dde5f5",
+                  background: "white",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={addRow}
+                  disabled={!workplan?.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    padding: "10px 20px",
+                    borderRadius: "8px",
+                    background: "#0B1F45",
+                    border: "none",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    color: "white",
+                    cursor: workplan?.id ? "pointer" : "not-allowed",
+                    opacity: workplan?.id ? 1 : 0.5,
+                    transition: "background-color 0.15s ease, transform 0.1s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!workplan?.id) return;
+                    e.currentTarget.style.background = "#162d5e";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#0B1F45";
+                    e.currentTarget.style.transform = "scale(1)";
+                  }}
+                  onMouseDown={(e) => {
+                    if (!workplan?.id) return;
+                    e.currentTarget.style.transform = "scale(0.98)";
+                  }}
+                  onMouseUp={(e) => {
+                    if (!workplan?.id) return;
+                    e.currentTarget.style.transform = "scale(1)";
+                  }}
+                >
+                  <PlusIcon /> Add Objective
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1959,17 +2067,12 @@ export function WorkplanSection({
             </div>
             <div className="flex-1 divide-y divide-[#dde5f5] overflow-y-auto">
               {filtered.map((obj) => {
-                const isUsed = usedIds.has(obj.id);
                 return (
                   <button
                     key={obj.id}
                     type="button"
-                    disabled={isUsed}
-                    onClick={() => !isUsed && selectObjective(obj)}
-                    className={cn(
-                      "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
-                      isUsed ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:bg-[#f8faff]"
-                    )}
+                    onClick={() => selectObjective(obj)}
+                    className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#f8faff]"
                   >
                     {obj.type === "CORPORATE" ? (
                       <span className="mt-0.5 flex-shrink-0 inline-flex rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[9px] font-semibold text-[#1d4ed8]">Corp</span>
@@ -1985,14 +2088,9 @@ export function WorkplanSection({
                         <span className="rounded-[4px] border border-[#dde5f5] bg-[#eef2fb] px-1.5 py-0.5 font-mono text-[10px] text-[#8a97b8]">
                           {obj.external_id}
                         </span>
-                        {isUsed && (
-                          <span className="text-[9px] font-semibold text-[#8a97b8]">In use</span>
-                        )}
                       </div>
                     </div>
-                    {!isUsed && (
-                      <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#dde5f5]" />
-                    )}
+                    <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#dde5f5]" />
                   </button>
                 );
               })}
