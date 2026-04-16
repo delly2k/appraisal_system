@@ -1340,6 +1340,23 @@ export function WorkplanSection({
                               <p className="break-words text-[11px] font-medium leading-[1.35] text-[#0f1f3d] whitespace-normal">{row.corporate.title}</p>
                               <p className="font-mono text-[9px] text-[#8a97b8]">{row.corporate.external_id}</p>
                             </div>
+                          ) : row.corporate_objective?.trim() ? (
+                            <div
+                              onClick={() => openPicker(row.id, "corporate")}
+                              className="group flex w-full cursor-pointer flex-col gap-[3px] rounded-[8px] border border-[#dde5f5] bg-white p-[5px_7px] transition-colors hover:bg-[#f8faff]"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="inline-flex rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-[6px] py-[1px] text-[9px] font-semibold text-[#1d4ed8]">Corporate</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); clearObjective(row.id, "corporate"); }}
+                                  className="px-[2px] text-[11px] leading-none text-[#8a97b8] opacity-0 transition-opacity hover:text-[#dc2626] group-hover:opacity-100"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <p className="break-words text-[11px] font-medium leading-[1.35] text-[#0f1f3d] whitespace-normal">{row.corporate_objective}</p>
+                            </div>
                           ) : (
                             <button
                               type="button"
@@ -1373,19 +1390,36 @@ export function WorkplanSection({
                               <p className="break-words text-[11px] font-medium leading-[1.35] text-[#0f1f3d] whitespace-normal">{row.divisional.title}</p>
                               <p className="font-mono text-[9px] text-[#8a97b8]">{row.divisional.external_id}</p>
                             </div>
+                          ) : row.division_objective?.trim() ? (
+                            <div
+                              onClick={() => openPicker(row.id, "divisional")}
+                              className="group flex w-full cursor-pointer flex-col gap-[3px] rounded-[8px] border border-[#dde5f5] bg-white p-[5px_7px] transition-colors hover:bg-[#f8faff]"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="inline-flex rounded-full border border-[#99f6e4] bg-[#f0fdfa] px-[6px] py-[1px] text-[9px] font-semibold text-[#0f766e]">Divisional</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); clearObjective(row.id, "divisional"); }}
+                                  className="px-[2px] text-[11px] leading-none text-[#8a97b8] opacity-0 transition-opacity hover:text-[#dc2626] group-hover:opacity-100"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <p className="break-words text-[11px] font-medium leading-[1.35] text-[#0f1f3d] whitespace-normal">{row.division_objective}</p>
+                            </div>
                           ) : (
                             <button
                               type="button"
-                              disabled={!row.corporate}
-                              onClick={() => row.corporate && openPicker(row.id, "divisional")}
+                              disabled={!row.corporate && !row.corporate_objective?.trim()}
+                              onClick={() => (row.corporate || row.corporate_objective?.trim()) && openPicker(row.id, "divisional")}
                               className={cn(
                                 "group flex h-[34px] w-[34px] items-center justify-center rounded-full border-[1.5px] border-dashed border-[#dde5f5] bg-[#f8faff] transition-all",
-                                row.corporate
+                                row.corporate || row.corporate_objective?.trim()
                                   ? "cursor-pointer hover:border-[#0d9488] hover:bg-[#f0fdfa]"
                                   : "cursor-not-allowed opacity-50"
                               )}
                             >
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a97b8" strokeWidth="2" className={cn("transition-colors", row.corporate && "group-hover:stroke-[#0d9488]")}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a97b8" strokeWidth="2" className={cn("transition-colors", (row.corporate || row.corporate_objective?.trim()) && "group-hover:stroke-[#0d9488]")}>
                                 <circle cx="12" cy="12" r="9" />
                                 <line x1="12" y1="8" x2="12" y2="16" />
                                 <line x1="8" y1="12" x2="16" y2="12" />

@@ -149,3 +149,61 @@ export function shouldSkipMappingTarget(targetField: string | null | undefined):
   if (t === "row_number" || t.toLowerCase() === "skip") return true;
   return false;
 }
+
+function isValidCalendarYmd(y: number, m: number, d: number): boolean {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+function formatLocalYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Normalize a cell/API value to YYYY-MM-DD for Postgres DATE columns.
+ * Non-dates (e.g. "Ongoing", "TBD") return null so the field is stored blank.
+ */
+export function parseWorkplanDateForDb(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number" && !Number.isNaN(raw)) {
+    const date = XLSX.SSF.parse_date_code(raw);
+    if (date && date.y && date.m && date.d) {
+      return `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
+    }
+    return null;
+  }
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return formatLocalYmd(raw);
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (isoMatch) {
+    const y = Number(isoMatch[1]);
+    const m = Number(isoMatch[2]);
+    const d = Number(isoMatch[3]);
+    if (isValidCalendarYmd(y, m, d)) return s;
+    return null;
+  }
+
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = parseFloat(s);
+    if (!Number.isNaN(n)) {
+      const date = XLSX.SSF.parse_date_code(n);
+      if (date && date.y && date.m && date.d) {
+        return `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
+      }
+    }
+    return null;
+  }
+
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) {
+    const d = new Date(parsed);
+    const y = d.getFullYear();
+    if (y < 1900 || y > 2200) return null;
+    return formatLocalYmd(d);
+  }
+  return null;
+}

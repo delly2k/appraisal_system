@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { UploadStepIndicator } from "./UploadStepIndicator";
 import type { ColumnMapping } from "@/app/api/appraisals/[id]/workplan/analyse-columns/route";
 import {
+  parseWorkplanDateForDb,
   parseWorkplanWeight,
   parseWorksheetToWorkplanRows,
   shouldSkipMappingTarget,
@@ -51,10 +54,11 @@ interface WorkplanUploadModalProps {
 
 type WorkbookState = { workbook: XLSX.WorkBook; filename: string } | null;
 
-function applyMappingClient(
+/** Client preview pipeline (mirrors server `applyMapping`); keeps each row’s index in `allRows` for review exclusions. */
+function buildPreviewRowsWithSourceIndex(
   rows: Record<string, unknown>[],
   mapping: ColumnMapping[]
-): Record<string, unknown>[] {
+): Array<{ item: Record<string, unknown>; sourceIndex: number }> {
   const typeMap: Record<string, string> = {
     NUMBER: "NUMBER",
     NUM: "NUMBER",
@@ -71,55 +75,61 @@ function applyMappingClient(
     NARRATIVE: "PERCENT",
   };
 
-  const nonEmpty = rows.filter((row) =>
-    Object.values(row).some((v) => v !== null && v !== "" && v !== undefined)
-  );
+  const out: Array<{ item: Record<string, unknown>; sourceIndex: number }> = [];
 
-  return nonEmpty
-    .map((row) => {
-      const item: Record<string, unknown> = {};
-      const activitiesParts: string[] = [];
+  for (let sourceIndex = 0; sourceIndex < rows.length; sourceIndex++) {
+    const row = rows[sourceIndex];
+    const nonEmpty = Object.values(row).some((v) => v !== null && v !== "" && v !== undefined);
+    if (!nonEmpty) continue;
 
-      for (const m of mapping) {
-        if (shouldSkipMappingTarget(m.targetField)) continue;
-        const rawValue = row[m.excelColumn];
-        if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+    const item: Record<string, unknown> = {};
+    const activitiesParts: string[] = [];
 
-        if (m.targetField === "weight") {
-          item.weight = parseWorkplanWeight(rawValue);
-        } else if (m.targetField === "metric_target") {
-          const parsed = parseFloat(String(rawValue));
-          item.metric_target = Number.isNaN(parsed) ? null : parsed;
-        } else if (m.targetField === "metric_type") {
-          const v = String(rawValue).toUpperCase().trim();
-          item.metric_type = typeMap[v] ?? "PERCENT";
-        } else if (m.targetField === "metric_deadline") {
-          if (typeof rawValue === "number") {
-            const date = XLSX.SSF.parse_date_code(rawValue);
-            if (date && date.y && date.m && date.d) {
-              item.metric_deadline = `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
-            } else {
-              item.metric_deadline = String(rawValue).trim();
-            }
-          } else {
-            item.metric_deadline = String(rawValue).trim();
-          }
-        } else if (m.targetField === "activities") {
-          activitiesParts.push(String(rawValue).trim());
-        } else if (m.targetField) {
-          item[m.targetField] = String(rawValue).trim();
-        }
+    for (const m of mapping) {
+      if (shouldSkipMappingTarget(m.targetField)) continue;
+      const rawValue = row[m.excelColumn];
+      if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+
+      if (m.targetField === "weight") {
+        item.weight = parseWorkplanWeight(rawValue);
+      } else if (m.targetField === "metric_target") {
+        const parsed = parseFloat(String(rawValue));
+        item.metric_target = Number.isNaN(parsed) ? null : parsed;
+      } else if (m.targetField === "metric_type") {
+        const v = String(rawValue).toUpperCase().trim();
+        item.metric_type = typeMap[v] ?? "PERCENT";
+      } else if (m.targetField === "metric_deadline") {
+        item.metric_deadline = parseWorkplanDateForDb(rawValue);
+      } else if (m.targetField === "activities") {
+        activitiesParts.push(String(rawValue).trim());
+      } else if (m.targetField) {
+        item[m.targetField] = String(rawValue).trim();
       }
+    }
 
-      if (activitiesParts.length > 0) {
-        const act = activitiesParts.join("\n");
-        const ko = item.key_output != null ? String(item.key_output).trim() : "";
-        item.key_output = ko ? `${act}\n${ko}` : act;
-      }
+    if (activitiesParts.length > 0) {
+      const act = activitiesParts.join("\n");
+      const ko = item.key_output != null ? String(item.key_output).trim() : "";
+      item.key_output = ko ? `${act}\n${ko}` : act;
+    }
 
-      return item;
-    })
-    .filter((item) => item.major_task && (item.weight as number) > 0);
+    if (item.major_task && (item.weight as number) > 0) {
+      out.push({ item, sourceIndex });
+    }
+  }
+
+  return out;
+}
+
+function formatRowNumbersForMessage(previewIndices0Based: number[]): string {
+  const nums = [...new Set(previewIndices0Based)]
+    .sort((a, b) => a - b)
+    .map((i) => i + 1);
+  if (nums.length === 0) return "";
+  if (nums.length === 1) return String(nums[0]);
+  if (nums.length === 2) return `${nums[0]} and ${nums[1]}`;
+  const last = nums[nums.length - 1];
+  return `${nums.slice(0, -1).join(", ")}, and ${last}`;
 }
 
 export function WorkplanUploadModal({
@@ -141,6 +151,8 @@ export function WorkplanUploadModal({
   const [templateMeta, setTemplateMeta] = useState<Record<string, string>>({});
   /** 0-based sheet row where data headers were found; used to show B1:E3 metadata only for DBJ-style sheets. */
   const [dataHeaderRowIndex, setDataHeaderRowIndex] = useState(0);
+  /** Step 4 only: `allRows` indices to omit from the import payload. */
+  const [excludedSourceIndices, setExcludedSourceIndices] = useState<number[]>([]);
 
   useEffect(() => {
     if (step !== "sheet" || !workbookState?.workbook || !selectedSheet) return;
@@ -195,14 +207,59 @@ export function WorkplanUploadModal({
       .finally(() => setAnalysing(false));
   }, [workbookState, selectedSheet, appraisalId]);
 
-  const previewItems = step === "review" ? applyMappingClient(allRows, mappings) : [];
-  const totalWeight = previewItems.reduce((s, i) => s + ((i.weight as number) ?? 0), 0);
-  const weightValid = Math.abs(totalWeight - 100) <= 2;
-  const hasRequired = previewItems.every(
-    (i) => i.major_task && String(i.major_task).trim() && Number(i.weight ?? 0) > 0
+  const previewRowsWithSource = useMemo(
+    () => (step === "review" ? buildPreviewRowsWithSourceIndex(allRows, mappings) : []),
+    [step, allRows, mappings]
   );
-  const majorTaskSet = new Set(previewItems.map((i) => String(i.major_task).toLowerCase()));
-  const hasDupe = majorTaskSet.size < previewItems.length;
+
+  const excludedSet = useMemo(() => new Set(excludedSourceIndices), [excludedSourceIndices]);
+
+  const activePreviewRows = useMemo(
+    () => previewRowsWithSource.filter((r) => !excludedSet.has(r.sourceIndex)),
+    [previewRowsWithSource, excludedSet]
+  );
+
+  const previewItems = activePreviewRows.map((r) => r.item);
+  const totalWeight = previewItems.reduce((s, i) => s + ((i.weight as number) ?? 0), 0);
+  const weightValid = previewItems.length === 0 || Math.abs(totalWeight - 100) <= 2;
+  const hasRequired =
+    previewItems.length > 0 &&
+    previewItems.every((i) => i.major_task && String(i.major_task).trim() && Number(i.weight ?? 0) > 0);
+
+  const duplicateMeta = useMemo(() => {
+    const keyToPreviewIndices = new Map<string, number[]>();
+    activePreviewRows.forEach((row, previewIdx) => {
+      const key = String(row.item.major_task ?? "").trim().toLowerCase();
+      if (!key) return;
+      const arr = keyToPreviewIndices.get(key) ?? [];
+      arr.push(previewIdx);
+      keyToPreviewIndices.set(key, arr);
+    });
+    const groups = [...keyToPreviewIndices.values()].filter((indices) => indices.length > 1);
+    const dupPreviewIndexSet = new Set<number>();
+    for (const g of groups) for (const idx of g) dupPreviewIndexSet.add(idx);
+    const participating = groups.reduce((sum, g) => sum + g.length, 0);
+    /** Rows beyond the first occurrence for each major task (what will still duplicate if imported). */
+    const duplicateRowsToImport = activePreviewRows.length - keyToPreviewIndices.size;
+    return { groups, dupPreviewIndexSet, participating, duplicateRowsToImport };
+  }, [activePreviewRows]);
+
+  const hasDupe = duplicateMeta.groups.length > 0;
+
+  const duplicateBannerMessage = useMemo(() => {
+    if (!hasDupe) return "";
+    const parts = duplicateMeta.groups.map(
+      (indices) => `rows ${formatRowNumbersForMessage(indices)} share the same task`
+    );
+    const n = duplicateMeta.participating;
+    return `${n} duplicate major task${n === 1 ? "" : "s"} detected — ${parts.join(" · ")}. Review below or exclude before importing.`;
+  }, [duplicateMeta.groups, duplicateMeta.participating, hasDupe]);
+
+  const rowsToSubmit = useMemo(() => {
+    if (excludedSourceIndices.length === 0) return allRows;
+    const ex = excludedSet;
+    return allRows.filter((_, idx) => !ex.has(idx));
+  }, [allRows, excludedSet, excludedSourceIndices.length]);
 
   const handleConfirmImport = useCallback(async () => {
     setImportError(null);
@@ -213,7 +270,7 @@ export function WorkplanUploadModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workplanId,
-          rows: allRows,
+          rows: rowsToSubmit,
           mapping: mappings,
           filename: workbookState?.filename ?? "",
           sheetName: selectedSheet,
@@ -231,10 +288,17 @@ export function WorkplanUploadModal({
       setImportError(e instanceof Error ? e.message : "Import failed");
       setStep("review");
     }
-  }, [appraisalId, workplanId, allRows, mappings, workbookState, selectedSheet, onComplete, onClose]);
+  }, [appraisalId, workplanId, rowsToSubmit, mappings, workbookState, selectedSheet, onComplete, onClose]);
 
   const mappedCount = mappings.filter((m) => m.targetField && !shouldSkipMappingTarget(m.targetField)).length;
   const skipCount = mappings.length - mappedCount;
+
+  const setRowExcluded = useCallback((sourceIndex: number, exclude: boolean) => {
+    setExcludedSourceIndices((prev) => {
+      if (exclude) return prev.includes(sourceIndex) ? prev : [...prev, sourceIndex];
+      return prev.filter((x) => x !== sourceIndex);
+    });
+  }, []);
 
   const modalContent = (
     <div
@@ -468,9 +532,9 @@ export function WorkplanUploadModal({
                   Some rows are missing required fields (Major task, Weight)
                 </div>
               )}
-              {hasDupe && (
+              {hasDupe && duplicateBannerMessage && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-[8px] bg-[#fffbeb] border border-[#fcd34d] mb-4 text-[11px] text-[#92400e]">
-                  Duplicate major task detected
+                  {duplicateBannerMessage}
                 </div>
               )}
               {importError && (
@@ -479,68 +543,126 @@ export function WorkplanUploadModal({
                 </div>
               )}
               <div className="max-h-[300px] overflow-auto space-y-3 mb-4">
-                {previewItems.map((item, i) => (
-                  <div
-                    key={i}
-                    className="rounded-[12px] border border-[#dde5f5] p-3 bg-[#f8faff]"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#eff6ff] text-[#1d4ed8] text-[11px] font-semibold flex items-center justify-center">
-                          {i + 1}
-                        </span>
-                        <span className="font-medium text-[13px] text-[#0f1f3d] truncate">
-                          {String(item.major_task ?? "")}
-                        </span>
+                {previewRowsWithSource.map(({ item, sourceIndex }, previewIdx) => {
+                  const excluded = excludedSet.has(sourceIndex);
+                  const isDupMember =
+                    !excluded && duplicateMeta.dupPreviewIndexSet.has(previewIdx);
+                  return (
+                    <div
+                      key={`${sourceIndex}-${previewIdx}`}
+                      className={`rounded-[12px] border border-[#dde5f5] p-3 bg-[#f8faff] ${
+                        isDupMember ? "border-l-[3px] border-l-solid border-l-[#f59e0b]" : ""
+                      } ${excluded ? "opacity-40" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#eff6ff] text-[#1d4ed8] text-[11px] font-semibold flex items-center justify-center">
+                            {previewIdx + 1}
+                          </span>
+                          <div className="min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0">
+                            <span
+                              className={`font-medium text-[13px] text-[#0f1f3d] truncate ${
+                                excluded ? "line-through" : ""
+                              }`}
+                            >
+                              {String(item.major_task ?? "")}
+                            </span>
+                            {excluded && (
+                              <button
+                                type="button"
+                                onClick={() => setRowExcluded(sourceIndex, false)}
+                                className="text-[11px] font-medium text-[#0d9488] hover:underline shrink-0"
+                              >
+                                Undo
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isDupMember && (
+                            <span
+                              className="rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+                              style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
+                            >
+                              Duplicate
+                            </span>
+                          )}
+                          {!excluded && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 min-h-6 min-w-6 p-0 text-[#8a97b8] hover:text-[#0f1f3d]"
+                              aria-label="Exclude row from import"
+                              onClick={() => setRowExcluded(sourceIndex, true)}
+                            >
+                              <X className="h-4 w-4" strokeWidth={2} />
+                            </Button>
+                          )}
+                          <span className="text-[12px] font-bold text-[#0d9488] tabular-nums">
+                            {(item.weight as number) ?? 0}%
+                          </span>
+                        </div>
                       </div>
-                      <span className="flex-shrink-0 text-[12px] font-bold text-[#0d9488]">
-                        {(item.weight as number) ?? 0}%
-                      </span>
+                      <p className="text-[10px] text-[#8a97b8] mt-1 truncate">
+                        {String(item.corporate_objective ?? "")} → {String(item.division_objective ?? "")}
+                      </p>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {item.key_output != null && String(item.key_output).trim() !== "" && (
+                          <span className="inline-flex px-2 py-0.5 rounded bg-white border border-[#dde5f5] text-[10px] text-[#4a5a82]">
+                            {String(item.key_output)}
+                          </span>
+                        )}
+                        {item.performance_standard != null && String(item.performance_standard).trim() !== "" && (
+                          <span className="inline-flex px-2 py-0.5 rounded bg-white border border-[#dde5f5] text-[10px] text-[#4a5a82]">
+                            {String(item.performance_standard)}
+                          </span>
+                        )}
+                        {item.metric_type != null && String(item.metric_type).trim() !== "" && (
+                          <span className="inline-flex px-2 py-0.5 rounded bg-[#f0fdfa] border border-[#99f6e4] text-[10px] text-[#0d9488]">
+                            {String(item.metric_type)}
+                          </span>
+                        )}
+                        {item.metric_target != null && (
+                          <span className="inline-flex px-2 py-0.5 rounded bg-[#f0fdfa] border border-[#99f6e4] text-[10px] text-[#0d9488]">
+                            Target: {String(item.metric_target)}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-[10px] text-[#8a97b8] mt-1 truncate">
-                      {String(item.corporate_objective ?? "")} → {String(item.division_objective ?? "")}
-                    </p>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {item.key_output != null && String(item.key_output).trim() !== "" && (
-                        <span className="inline-flex px-2 py-0.5 rounded bg-white border border-[#dde5f5] text-[10px] text-[#4a5a82]">
-                          {String(item.key_output)}
-                        </span>
-                      )}
-                      {item.performance_standard != null && String(item.performance_standard).trim() !== "" && (
-                        <span className="inline-flex px-2 py-0.5 rounded bg-white border border-[#dde5f5] text-[10px] text-[#4a5a82]">
-                          {String(item.performance_standard)}
-                        </span>
-                      )}
-                      {item.metric_type != null && String(item.metric_type).trim() !== "" && (
-                        <span className="inline-flex px-2 py-0.5 rounded bg-[#f0fdfa] border border-[#99f6e4] text-[10px] text-[#0d9488]">
-                          {String(item.metric_type)}
-                        </span>
-                      )}
-                      {item.metric_target != null && (
-                        <span className="inline-flex px-2 py-0.5 rounded bg-[#f0fdfa] border border-[#99f6e4] text-[10px] text-[#0d9488]">
-                          Target: {String(item.metric_target)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end justify-between gap-3 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => setStep("mapping")}
+                  onClick={() => {
+                    setExcludedSourceIndices([]);
+                    setStep("mapping");
+                  }}
                   className="px-3 py-2 rounded-[8px] border border-[#dde5f5] bg-white text-[#4a5a82] text-[11px] font-semibold hover:bg-[#f8faff]"
                 >
                   Edit mapping
                 </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmImport}
-                  disabled={!weightValid || !hasRequired}
-                  className="px-3 py-2 rounded-[8px] bg-[#0d9488] text-white text-[11px] font-semibold hover:bg-[#0f766e] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Confirm & create workplan
-                </button>
+                <div className="flex flex-col items-end gap-1">
+                  <p className="text-[11px] text-[#8a97b8]">
+                    Importing {activePreviewRows.length} of {previewRowsWithSource.length} objectives
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleConfirmImport}
+                    disabled={!weightValid || !hasRequired}
+                    className="px-3 py-2 rounded-[8px] bg-[#0d9488] text-white text-[11px] font-semibold hover:bg-[#0f766e] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Confirm & create workplan
+                  </button>
+                  {hasDupe && duplicateMeta.duplicateRowsToImport > 0 && (
+                    <p className="text-[10px] text-[#92400e] text-right max-w-[280px]">
+                      ⚠ {duplicateMeta.duplicateRowsToImport} duplicate
+                      {duplicateMeta.duplicateRowsToImport === 1 ? "" : "s"} will be imported
+                    </p>
+                  )}
+                </div>
               </div>
             </>
           )}

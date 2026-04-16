@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
-import * as XLSX from "xlsx";
 import type { ColumnMapping } from "../analyse-columns/route";
-import { parseWorkplanWeight, shouldSkipMappingTarget } from "@/lib/workplan-excel-parse";
+import { parseWorkplanDateForDb, parseWorkplanWeight, shouldSkipMappingTarget } from "@/lib/workplan-excel-parse";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -81,16 +80,7 @@ function applyMapping(
         const v = String(rawValue).toUpperCase().trim();
         item.metric_type = typeMap[v] ?? "PERCENT";
       } else if (m.targetField === "metric_deadline") {
-        if (typeof rawValue === "number") {
-          const date = XLSX.SSF.parse_date_code(rawValue);
-          if (date && date.y && date.m && date.d) {
-            item.metric_deadline = `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
-          } else {
-            item.metric_deadline = String(rawValue).trim();
-          }
-        } else {
-          item.metric_deadline = String(rawValue).trim();
-        }
+        item.metric_deadline = parseWorkplanDateForDb(rawValue);
       } else if (m.targetField === "activities") {
         activitiesParts.push(String(rawValue).trim());
       } else if (m.targetField) {
@@ -205,12 +195,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         `Weights sum to ${totalWeight.toFixed(1)}% — please check your Weighting column. Note: enter numbers like 20 (percent points), not 0.20 unless you mean a fraction of 100%.`
       );
     }
-    const majorTasks = itemsToInsert.map((i) => i.major_task.trim().toLowerCase());
-    const dupes = majorTasks.filter((t, i) => majorTasks.indexOf(t) !== i);
-    if (dupes.length > 0) {
-      errors.push("Duplicate major task detected — consider adjusting before importing.");
-    }
-
     if (errors.length > 0) {
       return NextResponse.json({ errors }, { status: 422 });
     }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { withRetry } from "@/lib/retry-transient";
+import { parseWorkplanDateForDb } from "@/lib/workplan-excel-parse";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -231,8 +232,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
       const keyOutput =
         item.key_output ?? item.output ?? "";
       const metricType = item.metric_type && ["NUMBER", "DATE", "PERCENT"].includes(item.metric_type) ? item.metric_type : "PERCENT";
-      const metricDeadline = item.metric_deadline != null && String(item.metric_deadline).trim() !== "" ? String(item.metric_deadline).trim() : null;
-      const metricCompletionDate = item.metric_completion_date != null && String(item.metric_completion_date).trim() !== "" ? String(item.metric_completion_date).trim() : null;
+      const metricDeadline =
+        item.metric_deadline != null && String(item.metric_deadline).trim() !== ""
+          ? parseWorkplanDateForDb(item.metric_deadline)
+          : null;
+      const metricCompletionDate =
+        item.metric_completion_date != null && String(item.metric_completion_date).trim() !== ""
+          ? parseWorkplanDateForDb(item.metric_completion_date)
+          : null;
       const payload = {
         workplan_id: workplanId,
         corporate_objective: item.corporate_objective ?? "",

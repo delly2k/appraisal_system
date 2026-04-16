@@ -86,6 +86,11 @@ function fallbackMatch(headers: string[]): ColumnMapping[] {
         return { excelColumn: raw, targetField, confidence, reasoning };
       }
     }
+    if (e.includes("mis-") && e.includes("ker")) {
+      if (tryAssign("division_objective", "HIGH", "DBJ MIS-KER division objective column")) {
+        return { excelColumn: raw, targetField, confidence, reasoning };
+      }
+    }
     if (e.includes("corporate") && e.includes("objective")) {
       if (tryAssign("corporate_objective", "HIGH", "Corporate objective")) {
         return { excelColumn: raw, targetField, confidence, reasoning };
@@ -151,6 +156,51 @@ function fallbackMatch(headers: string[]): ColumnMapping[] {
   });
 }
 
+/** When the model skips a column, fill from rule-based fallback if that target is still unclaimed. */
+function mergeAiMappingsWithFallback(headers: string[], aiMappings: ColumnMapping[]): ColumnMapping[] {
+  const normalize = (s: string) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const fbList = fallbackMatch(headers);
+  const fbByCol = new Map(fbList.map((m) => [normalize(m.excelColumn), m]));
+  const aiByCol = new Map<string, ColumnMapping>();
+  for (const m of aiMappings) {
+    aiByCol.set(normalize(m.excelColumn), m);
+  }
+
+  const usedTargets = new Set<string>();
+  for (const m of aiMappings) {
+    if (m.targetField) usedTargets.add(m.targetField);
+  }
+
+  return headers.map((h) => {
+    const key = normalize(h);
+    const aiRow = aiByCol.get(key);
+    const fbRow = fbByCol.get(key);
+    if (aiRow?.targetField) {
+      return {
+        excelColumn: h,
+        targetField: aiRow.targetField,
+        confidence: aiRow.confidence,
+        reasoning: aiRow.reasoning,
+      };
+    }
+    if (fbRow?.targetField && !usedTargets.has(fbRow.targetField)) {
+      usedTargets.add(fbRow.targetField);
+      return {
+        excelColumn: h,
+        targetField: fbRow.targetField,
+        confidence: fbRow.confidence,
+        reasoning: `Heuristic: ${fbRow.reasoning}`,
+      };
+    }
+    return {
+      excelColumn: h,
+      targetField: null,
+      confidence: "SKIP",
+      reasoning: aiRow?.reasoning || fbRow?.reasoning || "No mapping",
+    };
+  });
+}
+
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser();
@@ -188,6 +238,7 @@ DBJ-specific rules:
 - "Activities" maps to activities (activity lines; stored with key output on import).
 - "Key Outputs" maps to key_output.
 - "Major Tasks" maps to major_task.
+- Map columns whose headers contain "MIS-KER", "MIS KER", or similar divisional KER codes to division_objective; corporate / strategic columns to corporate_objective. Never leave those unmapped when the header clearly indicates them.
 - The "#" or "No." column is only a row index — use targetField null and confidence SKIP (do not map to a data field).
 - "Weighting" and "Weight %" both map to weight as numeric percentage points (e.g. 20 means 20%).
 
@@ -237,7 +288,7 @@ Allowed targetField values must be one of: ${TARGET_FIELDS.map((f) => f.key).joi
         const parsed = JSON.parse(cleaned) as { mappings?: ColumnMapping[] };
         if (Array.isArray(parsed.mappings) && parsed.mappings.length > 0) {
           const fieldKeys = new Set<string>(TARGET_FIELDS.map((f) => f.key));
-          mappings = parsed.mappings.map((m) => {
+          const normalizedAi = parsed.mappings.map((m) => {
             const rawTf = m.targetField === null || m.targetField === undefined || m.targetField === "SKIP" ? null : String(m.targetField);
             const lowerTf = rawTf?.toLowerCase() ?? "";
             let normalized: string | null = rawTf;
@@ -250,6 +301,7 @@ Allowed targetField values must be one of: ${TARGET_FIELDS.map((f) => f.key).joi
               reasoning: String(m.reasoning ?? ""),
             };
           });
+          mappings = mergeAiMappingsWithFallback(headers, normalizedAi);
         } else {
           mappings = fallbackMatch(headers);
         }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { calcMgrResult } from "@/lib/metric-calc";
+import { parseWorkplanDateForDb } from "@/lib/workplan-excel-parse";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -29,7 +30,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const { id: itemId } = await context.params;
     const body = await req.json().catch(() => ({}));
     const mgrActualRaw = body.mgr_actual_raw !== undefined ? (body.mgr_actual_raw === null || body.mgr_actual_raw === "" ? null : Number(body.mgr_actual_raw)) : undefined;
-    const mgrCompletionDate = body.mgr_completion_date !== undefined ? (body.mgr_completion_date === null || body.mgr_completion_date === "" ? null : String(body.mgr_completion_date)) : undefined;
+    const mgrCompletionDate =
+      body.mgr_completion_date !== undefined
+        ? body.mgr_completion_date === null || body.mgr_completion_date === ""
+          ? null
+          : parseWorkplanDateForDb(body.mgr_completion_date)
+        : undefined;
 
     const supabase = getSupabaseAdmin();
 
