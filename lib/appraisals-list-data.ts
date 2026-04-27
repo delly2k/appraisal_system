@@ -27,6 +27,9 @@ export interface AppraisalListItem {
   reviewType: string;
   status: string;
   departmentName: string;
+  isDelegated?: boolean;
+  delegatedByName?: string | null;
+  delegatedToName?: string | null;
 }
 
 export interface AppraisalsListResult {
@@ -105,11 +108,48 @@ export async function getAppraisalsListForUser(
   if (!user) return { myAppraisals: [], reportsAppraisals: [] };
 
   const employeeId = user.employee_id ?? null;
+  const supabase = getSupabase();
 
-  const [reportsAppraisals, myAppraisals] = await Promise.all([
+  const delegatedAppraisalsPromise = employeeId
+    ? supabase
+        .from("appraisal_delegations")
+        .select("appraisal_id, delegated_to_name")
+        .eq("delegated_to", employeeId)
+    : Promise.resolve({
+        data: [] as Array<{ appraisal_id: string; delegated_to_name?: string | null }>,
+        error: null as null,
+      });
+
+  const [reportsAppraisals, myOwnAppraisals, delegatedRowsResult] = await Promise.all([
     getAppraisalsForDirectReportsFromDynamics(user),
     employeeId ? getAppraisalsForEmployee(employeeId) : Promise.resolve([]),
+    delegatedAppraisalsPromise,
   ]);
+
+  const delegatedRows = delegatedRowsResult.data ?? [];
+  let delegatedAppraisals: AppraisalListItem[] = [];
+  if (delegatedRows.length > 0) {
+    const delegatedIds = delegatedRows.map((d) => d.appraisal_id);
+    const { data: appraisals } = await supabase
+      .from("appraisals")
+      .select("id, employee_id, cycle_id, review_type, status")
+      .in("id", delegatedIds)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    delegatedAppraisals = await hydrateList(appraisals ?? [], supabase);
+    delegatedAppraisals = delegatedAppraisals.map((item) => ({
+      ...item,
+      isDelegated: true,
+      delegatedByName: item.delegatedByName ?? null,
+    }));
+  }
+
+  const seen = new Set<string>();
+  const myAppraisals = [...myOwnAppraisals, ...delegatedAppraisals].filter((item) => {
+    if (seen.has(item.appraisalId)) return false;
+    seen.add(item.appraisalId);
+    return true;
+  });
 
   return { myAppraisals, reportsAppraisals };
 }
@@ -220,6 +260,35 @@ async function hydrateList(
     .in("id", cycleIds);
   const nameByCycleId = new Map((cycles ?? []).map((c) => [c.id, c.name]));
 
+  const appraisalIds = appraisals.map((a) => a.id);
+  const { data: delegations } = appraisalIds.length
+    ? await supabase
+        .from("appraisal_delegations")
+        .select("appraisal_id, delegated_to_name")
+        .in("appraisal_id", appraisalIds)
+    : { data: [] as Array<{ appraisal_id: string; delegated_to_name: string }> };
+  const delegationByAppraisal = new Map(
+    (delegations ?? []).map((d) => [d.appraisal_id, d.delegated_to_name])
+  );
+
+  const { data: appraisalManagers } = await supabase
+    .from("appraisals")
+    .select("id, manager_employee_id")
+    .in("id", appraisalIds);
+  const managerIdByAppraisal = new Map(
+    (appraisalManagers ?? []).map((a) => [a.id, a.manager_employee_id as string | null])
+  );
+  const allManagerEmployeeIds = [...new Set((appraisalManagers ?? []).map((a) => a.manager_employee_id).filter(Boolean))] as string[];
+  const { data: managerEmployees } = allManagerEmployeeIds.length
+    ? await supabase
+        .from("employees")
+        .select("employee_id, full_name")
+        .in("employee_id", allManagerEmployeeIds)
+    : { data: [] as Array<{ employee_id: string; full_name: string | null }> };
+  const managerNameByEmployeeId = new Map(
+    (managerEmployees ?? []).map((e) => [e.employee_id, e.full_name ?? "Manager"])
+  );
+
   return appraisals.map((a) => ({
     appraisalId: a.id,
     employeeId: a.employee_id,
@@ -229,5 +298,7 @@ async function hydrateList(
     reviewType: a.review_type ?? "—",
     status: (a.status as string) ?? "DRAFT",
     departmentName: departmentByEmployeeId.get(a.employee_id) ?? "—",
+    delegatedToName: delegationByAppraisal.get(a.id) ?? null,
+    delegatedByName: managerNameByEmployeeId.get(managerIdByAppraisal.get(a.id) ?? "") ?? null,
   }));
 }

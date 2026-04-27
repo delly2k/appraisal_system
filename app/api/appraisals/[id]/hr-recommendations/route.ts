@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -53,10 +54,19 @@ export async function GET(
     if (!hrAllowed) {
       const { data: appraisal } = await supabase
         .from("appraisals")
-        .select("manager_employee_id")
+        .select("id, employee_id, manager_employee_id")
         .eq("id", appraisalId)
         .single();
-      const isManager = appraisal?.manager_employee_id === user.employee_id;
+      const managerAccess = appraisal
+        ? await resolveManagerAccessForAppraisal({
+            supabase,
+            appraisalId,
+            appraisalEmployeeId: appraisal.employee_id,
+            appraisalManagerEmployeeId: appraisal.manager_employee_id,
+            currentEmployeeId: user.employee_id ?? null,
+          })
+        : { hasManagerAccess: false };
+      const isManager = managerAccess.hasManagerAccess;
       if (!isManager) return NextResponse.json({ error: "HR or manager access required" }, { status: 403 });
     }
 
@@ -97,7 +107,7 @@ export async function POST(
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, manager_employee_id")
+      .select("id, status, employee_id, manager_employee_id")
       .eq("id", appraisalId)
       .single();
 
@@ -108,7 +118,14 @@ export async function POST(
     const appStatus = (appraisal.status as string) ?? "";
     const isManagerReviewPhase = appStatus === "MANAGER_REVIEW" || appStatus === "SUBMITTED";
     const hrAllowed = isHR(user) && (appStatus === "HR_REVIEW" || isManagerReviewPhase);
-    const managerAllowed = appraisal.manager_employee_id === user.employee_id && isManagerReviewPhase;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id ?? null,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id ?? null,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+    const managerAllowed = managerAccess.hasManagerAccess && isManagerReviewPhase;
     if (!hrAllowed && !managerAllowed) {
       return NextResponse.json(
         { error: "Appraisal must be in HR Review (for HR) or Manager Review (for manager) to save recommendations" },

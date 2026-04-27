@@ -3,8 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { transitionStatus } from "@/lib/appraisal-workflow";
 import { isAppraisalStatus } from "@/types/appraisal";
-import { resolveManagerSystemUserId, resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
+import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -84,8 +85,14 @@ export async function POST(
       return NextResponse.json({ error: "Only the employee can sign as EMPLOYEE" }, { status: 403 });
     }
     if (role === "MANAGER" && !allowAppraisalTestBypass()) {
-      const managerSystemUserId = await resolveManagerSystemUserId(appraisal.employee_id) ?? appraisal.manager_employee_id ?? null;
-      if (managerSystemUserId !== user.employee_id) {
+      const managerAccess = await resolveManagerAccessForAppraisal({
+        supabase,
+        appraisalId,
+        appraisalEmployeeId: appraisal.employee_id,
+        appraisalManagerEmployeeId: appraisal.manager_employee_id,
+        currentEmployeeId: user.employee_id ?? null,
+      });
+      if (!managerAccess.hasManagerAccess) {
         return NextResponse.json({ error: "Only the manager can sign as MANAGER" }, { status: 403 });
       }
     }

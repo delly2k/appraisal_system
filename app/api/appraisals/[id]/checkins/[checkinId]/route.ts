@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -14,23 +15,24 @@ type RouteContext = { params: Promise<{ id: string; checkinId: string }> };
 
 function canAccessAppraisal(
   user: { roles?: string[]; employee_id?: string | null; division_id?: string | null },
-  appraisal: { employee_id: string; manager_employee_id: string | null; division_id?: string | null }
+  appraisal: { employee_id: string; manager_employee_id: string | null; division_id?: string | null },
+  hasManagerAccess: boolean
 ) {
   return (
     user.roles?.some((r) => r === "hr" || r === "admin") ||
     appraisal.employee_id === user.employee_id ||
-    appraisal.manager_employee_id === user.employee_id ||
+    hasManagerAccess ||
     (user.roles?.includes("gm") && appraisal.division_id === user.division_id)
   );
 }
 
 function isManagerOrHR(
   user: { roles?: string[]; employee_id?: string | null },
-  appraisal: { manager_employee_id: string | null }
+  hasManagerAccess: boolean
 ) {
   return (
     user.roles?.some((r) => r === "hr" || r === "admin") ||
-    appraisal.manager_employee_id === user.employee_id
+    hasManagerAccess
   );
 }
 
@@ -47,7 +49,16 @@ async function ensureAccessAndCheckIn(
     .single();
 
   if (appErr || !appraisal) return { error: NextResponse.json({ error: "Appraisal not found" }, { status: 404 }) };
-  if (!canAccessAppraisal(user, appraisal)) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  const managerAccess = await resolveManagerAccessForAppraisal({
+    supabase,
+    appraisalId,
+    appraisalEmployeeId: appraisal.employee_id,
+    appraisalManagerEmployeeId: appraisal.manager_employee_id,
+    currentEmployeeId: user.employee_id ?? null,
+  });
+  if (!canAccessAppraisal(user, appraisal, managerAccess.hasManagerAccess)) {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
 
   const { data: checkIn, error: ciErr } = await supabase
     .from("check_ins")
@@ -246,7 +257,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (action === "MANAGER_RESPOND") {
-      if (!isManagerOrHR(user, appraisal)) {
+      const managerAccess = await resolveManagerAccessForAppraisal({
+        supabase,
+        appraisalId,
+        appraisalEmployeeId: appraisal.employee_id,
+        appraisalManagerEmployeeId: appraisal.manager_employee_id,
+        currentEmployeeId: user.employee_id ?? null,
+      });
+      if (!isManagerOrHR(user, managerAccess.hasManagerAccess)) {
         return NextResponse.json({ error: "Only the manager or HR can add a response" }, { status: 403 });
       }
       if (status !== "EMPLOYEE_SUBMITTED") {
@@ -275,7 +293,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (action === "MANAGER_COMPLETE") {
-      if (!isManagerOrHR(user, appraisal) && !allowAppraisalTestBypass()) {
+      const managerAccess = await resolveManagerAccessForAppraisal({
+        supabase,
+        appraisalId,
+        appraisalEmployeeId: appraisal.employee_id,
+        appraisalManagerEmployeeId: appraisal.manager_employee_id,
+        currentEmployeeId: user.employee_id ?? null,
+      });
+      if (!isManagerOrHR(user, managerAccess.hasManagerAccess) && !allowAppraisalTestBypass()) {
         return NextResponse.json({ error: "Only the manager or HR can complete" }, { status: 403 });
       }
       if (status !== "EMPLOYEE_SUBMITTED") {
@@ -329,7 +354,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (action === "CANCEL") {
-      if (!isManagerOrHR(user, appraisal) && !allowAppraisalTestBypass()) {
+      const managerAccess = await resolveManagerAccessForAppraisal({
+        supabase,
+        appraisalId,
+        appraisalEmployeeId: appraisal.employee_id,
+        appraisalManagerEmployeeId: appraisal.manager_employee_id,
+        currentEmployeeId: user.employee_id ?? null,
+      });
+      if (!isManagerOrHR(user, managerAccess.hasManagerAccess) && !allowAppraisalTestBypass()) {
         return NextResponse.json({ error: "Only the manager or HR can cancel" }, { status: 403 });
       }
       await supabase

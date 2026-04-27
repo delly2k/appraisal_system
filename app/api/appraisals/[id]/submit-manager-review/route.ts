@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { isAppraisalStatus } from "@/types/appraisal";
-import { resolveManagerSystemUserId } from "@/lib/hrmis-approval-auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
 import { fetchCompletionReport } from "@/lib/appraisal-completion";
 import { notifyEmployee } from "@/lib/notifications";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -43,8 +43,14 @@ export async function POST(
       );
     }
 
-    const managerSystemUserId = await resolveManagerSystemUserId(appraisal.employee_id) ?? appraisal.manager_employee_id ?? null;
-    if (!allowAppraisalTestBypass() && managerSystemUserId !== user.employee_id) {
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+    if (!allowAppraisalTestBypass() && !managerAccess.hasManagerAccess) {
       return NextResponse.json({ error: "Only the manager can submit manager review" }, { status: 403 });
     }
 

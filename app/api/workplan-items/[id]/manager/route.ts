@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { calcMgrResult } from "@/lib/metric-calc";
 import { parseWorkplanDateForDb } from "@/lib/workplan-excel-parse";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -61,7 +62,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const { data: appraisal, error: appErr } = await supabase
       .from("appraisals")
-      .select("id, status, manager_employee_id")
+      .select("id, status, employee_id, manager_employee_id")
       .eq("id", workplan.appraisal_id)
       .single();
 
@@ -74,7 +75,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Appraisal is not in MANAGER_REVIEW phase" }, { status: 400 });
     }
 
-    const isManager = appraisal.manager_employee_id === user.employee_id;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId: appraisal.id,
+      appraisalEmployeeId: appraisal.employee_id ?? null,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id ?? null,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+    const isManager = managerAccess.hasManagerAccess;
     const isHrOrAdmin = user.roles?.some((r) => r === "hr" || r === "admin");
     if (!isManager && !isHrOrAdmin) {
       return NextResponse.json({ error: "Only the manager for this appraisal can update manager ratings" }, { status: 403 });

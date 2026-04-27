@@ -41,16 +41,20 @@ const DocumentEmptyIcon = () => (
 );
 
 interface AppraisalTableProps {
+  section: "mine" | "team";
   rows: Array<{
     appraisalId: string;
     employeeName: string;
     cycleName: string;
     reviewType: string;
     status: string;
+    isDelegated?: boolean;
+    delegatedByName?: string | null;
+    delegatedToName?: string | null;
   }>;
 }
 
-function AppraisalTable({ rows }: AppraisalTableProps) {
+function AppraisalTable({ rows, section }: AppraisalTableProps) {
   return (
     <div
       className="overflow-hidden rounded-[14px] bg-white"
@@ -96,7 +100,15 @@ function AppraisalTable({ rows }: AppraisalTableProps) {
               }}
             >
               <td className="px-5 py-3.5">
-                <EmployeeCell name={row.employeeName} />
+                <div>
+                  <EmployeeCell name={row.employeeName} />
+                  {section === "team" && row.delegatedToName && (
+                    <div className="mt-1 text-[11px] text-[#8a97b8]">
+                      <span className="mr-1">👤</span>
+                      Delegated to {row.delegatedToName}
+                    </div>
+                  )}
+                </div>
               </td>
               <td className="px-5 py-3.5">
                 <CycleChip year={row.cycleName} />
@@ -105,7 +117,17 @@ function AppraisalTable({ rows }: AppraisalTableProps) {
                 <ReviewTypeBadge type={row.reviewType} />
               </td>
               <td className="px-5 py-3.5">
-                <StatusBadge status={row.status} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={row.status} />
+                  {section === "mine" && row.isDelegated && (
+                    <span
+                      className="rounded-full bg-[#e6f4f1] px-2 py-0.5 text-[10px] font-semibold text-[#0f8a6e]"
+                      title={`Delegated by ${row.delegatedByName ?? "manager"}`}
+                    >
+                      Delegated
+                    </span>
+                  )}
+                </div>
               </td>
               <td className="px-5 py-3.5 text-right">
                 <Link
@@ -156,7 +178,7 @@ export default async function AppraisalsPage() {
         />
         
         {hasOwn ? (
-          <AppraisalTable rows={myAppraisals} />
+          <AppraisalTable section="mine" rows={myAppraisals} />
         ) : (
           <div
             className="rounded-[14px] bg-white"
@@ -185,7 +207,7 @@ export default async function AppraisalsPage() {
             variant="violet"
           />
           
-          <AppraisalTable rows={reportsAppraisals} />
+          <AppraisalTable section="team" rows={reportsAppraisals} />
         </div>
       )}
 

@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import { getReportingStructureFromDynamics, getReportingStructure } from "@/lib/reporting-structure";
 import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 import type { AppraisalStatus } from "@/types/appraisal";
 import { AppraisalTabs, AppraisalData, type AppraisalAgreement } from "@/components/appraisal/AppraisalTabs";
 import { CompletionBarWrapperClient } from "@/components/appraisal/CompletionBarWrapperClient";
@@ -147,7 +148,8 @@ async function getAppraisalDetail(
 function canAccessAppraisal(
   user: { roles?: string[]; employee_id?: string | null; division_id?: string | null } | null,
   appraisal: { employee_id: string; manager_employee_id: string | null; division_id?: string | null },
-  hrmisEmployeeId: string | null
+  hrmisEmployeeId: string | null,
+  hasManagerAccess: boolean
 ): boolean {
   if (!user) return false;
   const roles = user.roles ?? [];
@@ -157,6 +159,7 @@ function canAccessAppraisal(
   if (roles.includes("hr") || roles.includes("admin")) return true;
   if (appraisal.employee_id === empId) return true;
   if (appraisal.manager_employee_id === empId) return true;
+  if (hasManagerAccess) return true;
   if (roles.includes("gm") && divId && appraisal.division_id === divId) return true;
 
   return false;
@@ -235,14 +238,24 @@ export default async function AppraisalDetailPage({
     match: appraisal ? currentUserEmployeeId === appraisal.employee_id : null,
   });
 
-  if (!appraisal || !canAccessAppraisal(user, appraisal, currentUserEmployeeId)) {
+  if (!appraisal) {
+    notFound();
+  }
+
+  const supabase = getSupabase();
+  const managerAccess = await resolveManagerAccessForAppraisal({
+    supabase,
+    appraisalId: appraisal.id,
+    appraisalEmployeeId: appraisal.employee_id,
+    appraisalManagerEmployeeId: appraisal.manager_employee_id,
+    currentEmployeeId: currentUserEmployeeId,
+  });
+  if (!canAccessAppraisal(user, appraisal, currentUserEmployeeId, managerAccess.hasManagerAccess)) {
     notFound();
   }
 
   const roles = user?.roles ?? [];
-  const isManager =
-    appraisal.manager_employee_id === currentUserEmployeeId ||
-    roles.includes("manager");
+  const isManager = managerAccess.hasManagerAccess || roles.includes("manager");
   const isHR = roles.includes("hr") || roles.includes("admin");
   const hodSystemUserId = await resolveDepartmentHeadSystemUserId(appraisal.employee_id);
   const isHOD =
@@ -425,6 +438,9 @@ export default async function AppraisalDetailPage({
         currentUserId={user?.id ?? null}
         currentUserEmployeeId={currentUserEmployeeId}
         isManager={isManager}
+        isDelegated={managerAccess.isDelegated}
+        isPrimaryManager={managerAccess.isPrimaryManager}
+        delegatedByName={appraisal.managerName ?? null}
         isHR={isHR}
         isHOD={isHOD}
         showLeadership={showLeadership}

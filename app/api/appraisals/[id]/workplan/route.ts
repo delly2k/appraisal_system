@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { withRetry } from "@/lib/retry-transient";
 import { parseWorkplanDateForDb } from "@/lib/workplan-excel-parse";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,10 +39,17 @@ export async function GET(req: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
       }
 
+      const managerAccess = await resolveManagerAccessForAppraisal({
+        supabase,
+        appraisalId,
+        appraisalEmployeeId: appraisal.employee_id,
+        appraisalManagerEmployeeId: appraisal.manager_employee_id,
+        currentEmployeeId: user.employee_id ?? null,
+      });
       const canAccess =
         user.roles?.some((r) => r === "hr" || r === "admin") ||
         appraisal.employee_id === user.employee_id ||
-        appraisal.manager_employee_id === user.employee_id ||
+        managerAccess.hasManagerAccess ||
         (user.roles?.includes("gm") && appraisal.division_id === user.division_id);
 
       if (!canAccess) {
@@ -197,10 +205,17 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
     }
 
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
     const canEdit =
       user.roles?.some((r) => r === "hr" || r === "admin") ||
       appraisal.employee_id === user.employee_id ||
-      appraisal.manager_employee_id === user.employee_id;
+      managerAccess.hasManagerAccess;
 
     if (!canEdit) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

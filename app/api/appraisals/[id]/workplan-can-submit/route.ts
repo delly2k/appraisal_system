@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -36,7 +37,14 @@ export async function GET(
     }
 
     const isEmployee = appraisal.employee_id === user.employee_id;
-    const isManager = appraisal.manager_employee_id === user.employee_id;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+    const isManager = managerAccess.hasManagerAccess;
     if (!isEmployee && !isManager) {
       return NextResponse.json({ canSubmit: false });
     }

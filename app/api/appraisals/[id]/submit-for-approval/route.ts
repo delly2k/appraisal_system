@@ -6,6 +6,7 @@ import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
 import { isAppraisalStatus } from "@/types/appraisal";
 import { fetchCompletionReport } from "@/lib/appraisal-completion";
 import { notifyEmployee, notifyManager } from "@/lib/notifications";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -44,7 +45,14 @@ export async function POST(
     }
 
     const isEmployee = appraisal.employee_id === user.employee_id;
-    const isManager = appraisal.manager_employee_id === user.employee_id;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+    const isManager = managerAccess.hasManagerAccess;
     if (!allowAppraisalTestBypass() && !isEmployee && !isManager) {
       return NextResponse.json({ error: "Only the employee or manager can submit the workplan for approval" }, { status: 403 });
     }

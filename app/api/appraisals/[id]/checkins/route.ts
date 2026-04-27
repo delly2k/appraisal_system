@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { allowAppraisalTestBypass } from "@/lib/appraisal-test-bypass";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -14,23 +15,24 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 function canAccessAppraisal(
   user: { roles?: string[]; employee_id?: string | null; division_id?: string | null },
-  appraisal: { employee_id: string; manager_employee_id: string | null; division_id?: string | null }
+  appraisal: { employee_id: string; manager_employee_id: string | null; division_id?: string | null },
+  hasManagerAccess: boolean
 ) {
   return (
     user.roles?.some((r) => r === "hr" || r === "admin") ||
     appraisal.employee_id === user.employee_id ||
-    appraisal.manager_employee_id === user.employee_id ||
+    hasManagerAccess ||
     (user.roles?.includes("gm") && appraisal.division_id === user.division_id)
   );
 }
 
 function isManagerOrHR(
   user: { roles?: string[]; employee_id?: string | null },
-  appraisal: { manager_employee_id: string | null }
+  hasManagerAccess: boolean
 ) {
   return (
     user.roles?.some((r) => r === "hr" || r === "admin") ||
-    appraisal.manager_employee_id === user.employee_id
+    hasManagerAccess
   );
 }
 
@@ -53,7 +55,15 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Appraisal not found" }, { status: 404 });
     }
 
-    if (!canAccessAppraisal(user, appraisal)) {
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
+
+    if (!canAccessAppraisal(user, appraisal, managerAccess.hasManagerAccess)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -244,8 +254,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: user.employee_id ?? null,
+    });
     const isEmployee = appraisal.employee_id === user.employee_id;
-    const canCreate = isManagerOrHR(user, appraisal) || isEmployee || allowAppraisalTestBypass();
+    const canCreate = isManagerOrHR(user, managerAccess.hasManagerAccess) || isEmployee || allowAppraisalTestBypass();
     if (!canCreate) {
       return NextResponse.json({ error: "Only the manager, HR, or the employee can create a check-in during In progress." }, { status: 403 });
     }

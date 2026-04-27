@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { generateAppraisalPDF } from "@/lib/appraisal-pdf";
 import { uploadTransientDocument, createAgreement } from "@/lib/adobe-sign";
 import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -101,7 +102,14 @@ export async function POST(
       );
     }
 
-    const isManager = appraisal.manager_employee_id === currentUser.employee_id;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: currentUser.employee_id ?? null,
+    });
+    const isManager = managerAccess.hasManagerAccess;
     const isHR = currentUser.roles?.some((r) => r === "hr" || r === "admin");
     if (!isManager && !isHR) {
       return NextResponse.json({ error: "Only the manager or HR may submit for sign-off" }, { status: 403 });

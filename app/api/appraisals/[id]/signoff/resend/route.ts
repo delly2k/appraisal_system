@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/auth";
 import { sendReminder } from "@/lib/adobe-sign";
 import { resolveDepartmentHeadSystemUserId } from "@/lib/hrmis-approval-auth";
+import { resolveManagerAccessForAppraisal } from "@/lib/appraisal-manager-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -31,7 +32,14 @@ export async function POST(
     if (!appraisal) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const isEmployee = appraisal.employee_id === currentUser.employee_id;
-    const isManager = appraisal.manager_employee_id === currentUser.employee_id;
+    const managerAccess = await resolveManagerAccessForAppraisal({
+      supabase,
+      appraisalId,
+      appraisalEmployeeId: appraisal.employee_id,
+      appraisalManagerEmployeeId: appraisal.manager_employee_id,
+      currentEmployeeId: currentUser.employee_id ?? null,
+    });
+    const isManager = managerAccess.hasManagerAccess;
     const isHR = currentUser.roles?.some((r) => r === "hr" || r === "admin");
     const isHOD = currentUser.roles?.some((r) => r === "gm" || r === "admin");
 

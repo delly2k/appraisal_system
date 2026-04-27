@@ -14,6 +14,7 @@ import { SignoffsTab } from "./SignoffsTab";
 import { HRActionsTab } from "./HRActionsTab";
 import { AuditTrailTab } from "./AuditTrailTab";
 import { CheckInTab } from "./checkins/CheckInTab";
+import { DelegationTab } from "./DelegationTab";
 import { canEditField, type WorkflowRole } from "@/lib/appraisal-workflow";
 import type { SummaryResult } from "@/lib/summary-calc";
 import type { AppraisalStatus } from "@/types/appraisal";
@@ -71,6 +72,9 @@ interface AppraisalTabsProps {
   currentUserId: string | null;
   currentUserEmployeeId: string | null;
   isManager: boolean;
+  isDelegated?: boolean;
+  isPrimaryManager?: boolean;
+  delegatedByName?: string | null;
   isHR: boolean;
   isHOD?: boolean;
   showLeadership?: boolean;
@@ -79,7 +83,7 @@ interface AppraisalTabsProps {
   hrRecommendationsSaved?: boolean;
 }
 
-type TabValue = "workplan" | "checkins" | "core" | "technical" | "productivity" | "leadership" | "summary" | "signoffs" | "hractions" | "audit";
+type TabValue = "workplan" | "checkins" | "core" | "technical" | "productivity" | "leadership" | "summary" | "signoffs" | "hractions" | "delegation" | "audit";
 
 const ClipboardIcon = () => (
   <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -337,6 +341,9 @@ export function AppraisalTabs({
   currentUserId,
   currentUserEmployeeId,
   isManager,
+  isDelegated = false,
+  isPrimaryManager = false,
+  delegatedByName = null,
   isHR,
   isHOD = false,
   showLeadership: showLeadershipProp,
@@ -433,7 +440,7 @@ export function AppraisalTabs({
   }, []);
 
   const isEmployee = currentUserEmployeeId === appraisal.employee_id;
-  const isAppraisalManager = currentUserEmployeeId === appraisal.manager_employee_id;
+  const isAppraisalManager = isManager;
   const showLeadership = showLeadershipProp ?? appraisal.is_management;
   const testBypass = process.env.NEXT_PUBLIC_ALLOW_APPRAISAL_TEST_BYPASS === "true";
 
@@ -578,6 +585,7 @@ export function AppraisalTabs({
         ...((isHR || isAppraisalManager) && ["MANAGER_REVIEW", "PENDING_SIGNOFF", "HR_REVIEW", "COMPLETE"].includes(status) ? [{ id: "hractions" as const, label: "HR Actions", icon: <HRActionsIcon /> }] : []),
         { id: "summary", label: "Summary", icon: <FileTextIcon /> },
         ...(((status === "MANAGER_REVIEW" && (isAppraisalManager || isHR)) || status === "PENDING_SIGNOFF" || status === "HR_REVIEW" || status === "COMPLETE") ? [{ id: "signoffs" as const, label: "Sign-offs", icon: <PenLineIcon /> }] : []),
+        ...(isPrimaryManager ? [{ id: "delegation" as const, label: "Delegation", icon: <UsersIcon /> }] : []),
         { id: "audit", label: "Audit trail", icon: <HistoryIcon /> },
       ];
 
@@ -692,6 +700,8 @@ export function AppraisalTabs({
         );
       case "audit":
         return <AuditTrailTab appraisalId={appraisal.id} />;
+      case "delegation":
+        return <DelegationTab appraisalId={appraisal.id} />;
       case "checkins":
         return (
           <CheckInTab
@@ -726,6 +736,19 @@ export function AppraisalTabs({
 
   return (
     <div>
+      {isDelegated && (
+        <div
+          className="mb-4 w-full rounded-[10px] px-4 py-3 text-[13px]"
+          style={{
+            background: "#e6f4f1",
+            borderLeft: "3px solid #0F8A6E",
+            color: "#0F8A6E",
+          }}
+        >
+          You are managing this appraisal as a delegate for {delegatedByName ?? appraisal.managerName ?? "the manager"}. You have full access to review and action this appraisal.
+        </div>
+      )}
+
       {/* Approval panel (PENDING_APPROVAL) */}
       {isPendingApproval && (
         <ApprovalSignoffPanel
